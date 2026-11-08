@@ -281,6 +281,23 @@ class VaultService {
     return entries;
   }
 
+  /// Files and folders anywhere in the vault whose name contains [query], case-insensitively.
+  Future<List<VaultEntry>> search(String query, {int limit = 200}) async {
+    final needle = query.trim().toLowerCase();
+    if (needle.isEmpty) return [];
+    final reply = await rclone.call('operations/list', {
+      'fs': await _vault(),
+      'remote': '',
+      'opt': {'recurse': true},
+    });
+    return (reply['list'] as List)
+        .map((item) => VaultEntry.fromRclone(item as Map<String, dynamic>))
+        .where((entry) => entry.name.toLowerCase().contains(needle))
+        .take(limit)
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+  }
+
   Future<void> createFolder(String path) async {
     await rclone.call('operations/mkdir', {'fs': await _vault(), 'remote': path});
   }

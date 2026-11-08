@@ -18,6 +18,11 @@ final setupStatusProvider = FutureProvider<SetupStatus>((ref) async {
   return environment.vault.status();
 });
 
+final searchProvider = FutureProvider.autoDispose.family<List<VaultEntry>, String>((ref, query) async {
+  final environment = await ref.watch(environmentProvider.future);
+  return environment.vault.search(query);
+});
+
 final folderProvider = FutureProvider.autoDispose.family<List<VaultEntry>, String>((ref, directory) async {
   final environment = await ref.watch(environmentProvider.future);
   return environment.vault.list(directory);
