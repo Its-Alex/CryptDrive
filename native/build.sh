@@ -17,7 +17,8 @@ build_c_shared() {
 
 ndk_toolchain_bin() {
 	local sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-	local ndk="${ANDROID_NDK_HOME:-$sdk/ndk/${CRYPTDRIVE_NDK_VERSION:-28.2.13676358}}"
+	local ndk="$sdk/ndk/${CRYPTDRIVE_NDK_VERSION:-28.2.13676358}"
+	[ -d "$ndk" ] || ndk="${ANDROID_NDK_HOME:?NDK ${CRYPTDRIVE_NDK_VERSION:-28.2.13676358} not found in $sdk/ndk}"
 	local host
 	case "$(uname -s)" in
 	Linux) host=linux-x86_64 ;;
