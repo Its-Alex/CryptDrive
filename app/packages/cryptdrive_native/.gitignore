@@ -1,0 +1,8 @@
+.dart_tool/
+/build/
+/pubspec.lock
+linux/lib/
+windows/lib/
+android/src/main/jniLibs/
+macos/Libraries/
+ios/Libraries/
