@@ -29,7 +29,7 @@ secret_service_pid=$!
 
 export XDG_RUNTIME_DIR="$sandbox/runtime"
 mkdir -m 700 "$XDG_RUNTIME_DIR"
-weston --backend=headless --renderer=pixman --width=1280 --height=800 --socket=wayland-cryptdrive --debug \
+weston --backend=headless --renderer=pixman --width="${HEADLESS_WIDTH:-1280}" --height="${HEADLESS_HEIGHT:-800}" --socket=wayland-cryptdrive --debug \
 	--idle-time=0 >"$sandbox/weston.log" 2>&1 &
 weston_pid=$!
 for _ in $(seq 100); do
