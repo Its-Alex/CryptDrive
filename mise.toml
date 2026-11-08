@@ -1,0 +1,48 @@
+# Every tool is pinned to an exact version. No lockfile: mise's lockfile format
+# changed between releases (v3 → v4) and mise 2026.10 drops linux-x64 conda entries.
+[settings]
+lockfile = false
+
+[tools]
+go = "1.27.3"
+flutter = "3.47.9"
+java = "temurin-21.0.13+9.0.LTS"
+android-sdk = "23.0"
+cmake = "4.4.5"
+ninja = "1.13.2"
+"conda:clang" = { version = "23.1.4", os = ["linux"] }
+rclone = "1.76.0"
+
+[env]
+_.path = ["{{config_root}}/tools/bin"]
+
+[tasks."native:linux"]
+description = "Build libcryptdrive.so for Linux x64"
+run = "native/build.sh linux-x64"
+
+[tasks."native:android"]
+description = "Build libcryptdrive.so for Android ABIs (default: all; pass ABIs to narrow)"
+run = "native/build.sh android"
+
+[tasks."native:windows"]
+description = "Build cryptdrive.dll (run on Windows)"
+run = "native/build.sh windows-x64"
+
+[tasks."native:macos"]
+description = "Build universal libcryptdrive.dylib (run on macOS)"
+run = "native/build.sh macos"
+
+[tasks."native:ios"]
+description = "Build libcryptdrive.a for iOS devices (run on macOS)"
+run = "native/build.sh ios"
+
+[tasks."test:native"]
+description = "Go tests of the native bridge, including the encrypted round-trip"
+dir = "native"
+run = "go test ./..."
+
+[tasks."test:app"]
+description = "Dart/Flutter tests (needs native:linux)"
+depends = ["native:linux"]
+dir = "app"
+run = ["flutter test", "cd packages/cryptdrive_native && flutter test"]

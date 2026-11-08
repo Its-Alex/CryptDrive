@@ -1,0 +1,6 @@
+#!/bin/sh
+# conda's clang defaults to its own sysroot and linker; Flutter's Linux runner must link against the host GTK.
+set -e
+conda_clang="$(mise where conda:clang)/bin/clang-23"
+gcc_install_dir="$(dirname "$(gcc -print-libgcc-file-name)")"
+exec "$conda_clang" --no-default-config --gcc-install-dir="$gcc_install_dir" -fuse-ld=/usr/bin/ld -Wno-unused-command-line-argument "$@"
