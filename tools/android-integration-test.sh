@@ -12,14 +12,17 @@ avd="${2:-cryptdrive_api30}"
 package=io.github.itsalex.cryptdrive
 apk="$repo/app/build/app/outputs/flutter-apk/app-debug.apk"
 abi_platform=android-x64
+# Pin where AVDs live so avdmanager, this script and the emulator agree (they differ on GitHub runners).
+export ANDROID_AVD_HOME="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
+mkdir -p "$ANDROID_AVD_HOME"
 
 cd "$repo/app"
 flutter build apk --debug --target-platform "$abi_platform" -t "$test_file"
 
 if ! adb get-state >/dev/null 2>&1; then
 	if ! avdmanager list avd -c | grep -qx "$avd"; then
-		echo no | avdmanager create avd -n "$avd" -k "system-images;android-30;default;x86_64" -d pixel_4 --force
-		config="$HOME/.android/avd/$avd.avd/config.ini"
+		echo no | avdmanager create avd -n "$avd" -p "$ANDROID_AVD_HOME/$avd.avd" -k "system-images;android-30;default;x86_64" -d pixel_4 --force
+		config="$ANDROID_AVD_HOME/$avd.avd/config.ini"
 		sed -i 's/^hw.ramSize=.*/hw.ramSize=1024/; s/^hw.lcd.width=.*/hw.lcd.width=720/; s/^hw.lcd.height=.*/hw.lcd.height=1280/; s/^hw.lcd.density=.*/hw.lcd.density=320/' "$config"
 	fi
 	setsid nohup "$ANDROID_HOME/emulator/emulator" -avd "$avd" -no-window -no-audio -no-boot-anim \
