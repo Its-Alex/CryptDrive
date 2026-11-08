@@ -1,0 +1,43 @@
+name: cryptdrive
+description: "One encrypted Google Drive client: rclone crypt, client-side, on every platform."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cryptdrive_native:
+    path: packages/cryptdrive_native
+  file_picker: ^13.3.2
+  flutter_riverpod: ^3.5.0
+  flutter_secure_storage: ^11.2.0
+  open_filex: ^5.0.0
+  path: ^1.9.1
+  path_provider: ^2.1.6
+  receive_sharing_intent: ^1.9.0
+  share_plus: ^13.3.1
+  url_launcher: ^6.3.3
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  msix: ^3.18.0
+
+flutter:
+  uses-material-design: true
+
+msix_config:
+  display_name: CryptDrive
+  publisher_display_name: CryptDrive
+  identity_name: io.github.itsalex.cryptdrive
+  msix_version: 0.1.0.0
+  logo_path: android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+  capabilities: internetClient,privateNetworkClientServer
+  build_windows: false
+  output_name: CryptDrive
