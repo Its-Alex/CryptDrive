@@ -1,0 +1,239 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:path/path.dart' as p;
+import 'package:share_plus/share_plus.dart';
+
+import '../core/vault_service.dart';
+import '../state/providers.dart';
+import '../state/recent_files.dart';
+import '../state/transfers.dart';
+import 'entry_widgets.dart';
+import 'widgets.dart';
+
+enum EntryAction { open, preview, share, saveCopy, rename, move, delete }
+
+bool get canShareFiles => Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isWindows;
+
+bool canPreview(VaultEntry entry) {
+  final mime = entry.mimeType ?? '';
+  return mime.startsWith('text/') || mime == 'application/json' || ThumbnailCache.supports(entry);
+}
+
+Future<EntryAction?> showEntryActions(BuildContext context, VaultEntry entry, VaultService vault) {
+  ListTile item(EntryAction action, IconData icon, String label, {bool destructive = false}) {
+    final color = destructive ? Theme.of(context).colorScheme.error : null;
+    return ListTile(
+      leading: Icon(icon, color: color),
+      title: Text(label, style: TextStyle(color: color)),
+      onTap: () => Navigator.of(context).pop(action),
+    );
+  }
+
+  return showModalBottomSheet<EntryAction>(
+    context: context,
+    useSafeArea: true,
+    isScrollControlled: true,
+    builder: (context) => SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: EntryIcon(entry: entry, vault: vault),
+            title: Text(entry.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+            subtitle: Text(describeEntry(entry)),
+          ),
+          const Divider(height: 1),
+          if (!entry.isDir) ...[
+            item(EntryAction.open, Icons.open_in_new, 'Open'),
+            if (canPreview(entry)) item(EntryAction.preview, Icons.visibility_outlined, 'Preview'),
+            if (canShareFiles) item(EntryAction.share, Icons.share_outlined, 'Share'),
+            item(EntryAction.saveCopy, Icons.download_outlined, 'Save decrypted copy…'),
+          ],
+          item(EntryAction.rename, Icons.drive_file_rename_outline, 'Rename'),
+          item(EntryAction.move, Icons.drive_file_move_outline, 'Move'),
+          item(EntryAction.delete, Icons.delete_outline, 'Delete', destructive: true),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
+}
+
+/// Runs entry actions from any screen, with inline progress on the entry's row.
+class FileActions {
+  FileActions(this.context, this.ref);
+
+  final BuildContext context;
+  final WidgetRef ref;
+
+  VaultService get _vault => ref.read(environmentProvider).requireValue.vault;
+  Transfers get _transfers => ref.read(transfersProvider.notifier);
+
+  void _refresh(String directory) => ref.invalidate(folderProvider(directory));
+
+  Future<File?> _decrypt(VaultEntry entry) async {
+    _transfers.start(TransferKind.decrypt, entry.path);
+    try {
+      return await _vault.decryptToTemp(
+        entry,
+        onProgress: (progress) => _transfers.progress(entry.path, progress.fraction),
+      );
+    } catch (error) {
+      if (context.mounted) showMessage(context, describeError(error));
+      return null;
+    } finally {
+      _transfers.finish(entry.path);
+    }
+  }
+
+  Future<bool> _attempt(Future<void> Function() action) async {
+    try {
+      await action();
+      return true;
+    } catch (error) {
+      if (context.mounted) showMessage(context, describeError(error));
+      return false;
+    }
+  }
+
+  Future<void> upload(List<File> files, String directory, {bool deleteStaged = false}) async {
+    await Future.wait(
+      files.map((file) async {
+        final path = joinVaultPath(directory, p.basename(file.path));
+        _transfers.start(TransferKind.upload, path);
+        try {
+          await _vault.upload(file, directory, onProgress: (progress) => _transfers.progress(path, progress.fraction));
+          final size = await file.length();
+          await ref
+              .read(recentFilesProvider.notifier)
+              .record(
+                VaultEntry(path: path, name: p.basename(path), isDir: false, size: size, modTime: DateTime.now()),
+                RecentAction.uploaded,
+              );
+        } catch (error) {
+          if (context.mounted) showMessage(context, 'Upload of ${p.basename(path)} failed: ${describeError(error)}');
+        } finally {
+          _transfers.finish(path);
+          if (deleteStaged && await file.exists()) await file.delete();
+          _refresh(directory);
+        }
+      }),
+    );
+  }
+
+  /// Returns true when the entry left its folder (moved or deleted).
+  Future<bool> run(VaultEntry entry, EntryAction action) async {
+    final parent = parentVaultPath(entry.path);
+    switch (action) {
+      case EntryAction.open:
+        final file = await _decrypt(entry);
+        if (file == null) return false;
+        await ref.read(recentFilesProvider.notifier).record(entry, RecentAction.opened);
+        final result = await OpenFilex.open(file.path);
+        if (result.type != ResultType.done && context.mounted) {
+          showMessage(context, 'No app can open ${entry.name}: ${result.message}');
+        }
+        return false;
+      case EntryAction.preview:
+        try {
+          final bytes = await _vault.readHead(entry);
+          if (context.mounted) await showPreview(context, entry, bytes);
+        } catch (error) {
+          if (context.mounted) showMessage(context, describeError(error));
+        }
+        return false;
+      case EntryAction.share:
+        final file = await _decrypt(entry);
+        if (file != null) await SharePlus.instance.share(ShareParams(files: [XFile(file.path)]));
+        return false;
+      case EntryAction.saveCopy:
+        final file = await _decrypt(entry);
+        if (file == null) return false;
+        final saved = await FilePicker.saveFile(fileName: entry.name, bytes: await file.readAsBytes());
+        if (saved != null && context.mounted) showMessage(context, 'Saved a decrypted copy of ${entry.name}');
+        return false;
+      case EntryAction.rename:
+        final name = await askText(
+          context,
+          title: 'Rename',
+          label: 'New name',
+          initialValue: entry.name,
+          confirmLabel: 'Rename',
+        );
+        if (name == null || name.isEmpty || name == entry.name) return false;
+        final renamed = await _attempt(() => _vault.move(entry, joinVaultPath(parent, name)));
+        if (renamed) await ref.read(recentFilesProvider.notifier).forget(entry.path);
+        _refresh(parent);
+        return false;
+      case EntryAction.move:
+        final destination = await askText(
+          context,
+          title: 'Move ${entry.name}',
+          label: 'Destination folder (empty = vault root)',
+          initialValue: parent,
+          confirmLabel: 'Move',
+        );
+        if (destination == null) return false;
+        final folder = destination.replaceAll(RegExp(r'^/+|/+$'), '');
+        if (folder == parent) return false;
+        final moved = await _attempt(() => _vault.move(entry, joinVaultPath(folder, entry.name)));
+        if (moved) await ref.read(recentFilesProvider.notifier).forget(entry.path);
+        _refresh(parent);
+        _refresh(folder);
+        return moved;
+      case EntryAction.delete:
+        if (!await confirmDelete(context, entry)) return false;
+        return delete(entry);
+    }
+  }
+
+  Future<bool> delete(VaultEntry entry) async {
+    final deleted = await _attempt(() => _vault.delete(entry));
+    if (deleted) await ref.read(recentFilesProvider.notifier).forget(entry.path);
+    _refresh(parentVaultPath(entry.path));
+    return deleted;
+  }
+}
+
+Future<bool> confirmDelete(BuildContext context, VaultEntry entry) => confirm(
+  context,
+  title: 'Delete ${entry.name}?',
+  message: entry.isDir ? 'The folder and everything in it will be deleted.' : 'The file will be deleted.',
+  confirmLabel: 'Delete',
+);
+
+Future<void> showPreview(BuildContext context, VaultEntry entry, Uint8List bytes) {
+  final truncated = entry.size > bytes.length;
+  final isImage = entry.mimeType?.startsWith('image/') ?? false;
+  return showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(entry.name),
+      content: SizedBox(
+        width: 480,
+        child: isImage && !truncated
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.memory(
+                  bytes,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => const Text('Not a displayable image.'),
+                ),
+              )
+            : SingleChildScrollView(
+                child: SelectableText(
+                  utf8.decode(bytes, allowMalformed: true) + (truncated ? '\n…' : ''),
+                  style: const TextStyle(fontFamily: 'monospace'),
+                ),
+              ),
+      ),
+      actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
+    ),
+  );
+}

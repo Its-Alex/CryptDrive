@@ -101,11 +101,13 @@ class _GoogleAuthFormState extends State<GoogleAuthForm> {
             onPressed: () => launchUrl(Uri.parse(oauthClientDocsUrl), mode: LaunchMode.externalApplication),
           ),
         ),
+        const SizedBox(height: 12),
         TextField(
           key: const Key('clientIdField'),
           controller: _clientId,
           decoration: const InputDecoration(labelText: 'Client ID', hintText: '…apps.googleusercontent.com'),
         ),
+        const SizedBox(height: 12),
         TextField(
           key: const Key('clientSecretField'),
           controller: _clientSecret,

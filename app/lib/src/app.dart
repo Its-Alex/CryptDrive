@@ -5,8 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/bootstrap.dart';
 import 'state/providers.dart';
-import 'ui/browser_screen.dart';
+import 'ui/home_shell.dart';
 import 'ui/onboarding_screen.dart';
+import 'ui/theme.dart';
 import 'ui/widgets.dart';
 
 /// Riverpod 3 retries failed providers by default; bootstrap failures need the user instead.
@@ -20,8 +21,8 @@ class CryptDriveApp extends StatelessWidget {
     return MaterialApp(
       title: 'CryptDrive',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
-      darkTheme: ThemeData(colorSchemeSeed: Colors.indigo, brightness: Brightness.dark, useMaterial3: true),
+      theme: buildTheme(Brightness.light),
+      darkTheme: buildTheme(Brightness.dark),
       home: const _Root(),
     );
   }
@@ -63,7 +64,7 @@ class _RootState extends ConsumerState<_Root> {
   @override
   Widget build(BuildContext context) {
     final environment = ref.watch(environmentProvider);
-    return environment.when(
+    final screen = environment.when(
       loading: () => const LoadingScreen(message: 'Starting…'),
       error: (error, _) => _BootstrapErrorScreen(error: error),
       data: (_) {
@@ -71,10 +72,13 @@ class _RootState extends ConsumerState<_Root> {
         return status.when(
           loading: () => const LoadingScreen(message: 'Reading configuration…'),
           error: (error, _) => ErrorScreen(error: error, onRetry: () => ref.invalidate(setupStatusProvider)),
-          data: (status) =>
-              status.hasStorage && status.hasVault ? const BrowserScreen() : OnboardingScreen(status: status),
+          data: (status) => status.hasStorage && status.hasVault ? const HomeShell() : OnboardingScreen(status: status),
         );
       },
+    );
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      child: KeyedSubtree(key: ValueKey(screen.runtimeType), child: screen),
     );
   }
 }

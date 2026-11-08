@@ -16,46 +16,104 @@ class OnboardingScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final environment = ref.watch(environmentProvider).requireValue;
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Set up CryptDrive')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: ListView(
-            padding: const EdgeInsets.all(24),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 32, 20, 32),
+              children: [
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(color: scheme.primaryContainer, shape: BoxShape.circle),
+                    child: Icon(Icons.lock_rounded, size: 36, color: scheme.onPrimaryContainer),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Set up CryptDrive',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Your files are encrypted on this device before they reach the cloud.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 24),
+                _StepCard(
+                  number: 1,
+                  title: 'Connect your storage',
+                  done: status.hasStorage,
+                  child: !status.hasStorage
+                      ? _StorageStep(vault: environment.vault, onDone: () => ref.invalidate(setupStatusProvider))
+                      : Text(switch (status.storageKind) {
+                          StorageKind.googleDrive => 'Google Drive connected (client ${status.clientId ?? ''}).',
+                          StorageKind.localFolder => 'Using a local folder instead of Google Drive.',
+                          _ => 'Storage "${status.storageRemote}" configured.',
+                        }),
+                ),
+                const SizedBox(height: 16),
+                _StepCard(
+                  number: 2,
+                  title: 'Create or open your vault',
+                  done: status.hasVault,
+                  child: status.hasStorage
+                      ? _VaultStep(
+                          vault: environment.vault,
+                          status: status,
+                          localFolderBase: p.join(environment.supportDir.path, 'local-storage'),
+                          onDone: () => ref.invalidate(setupStatusProvider),
+                        )
+                      : Text('Connect your storage first.', style: TextStyle(color: scheme.onSurfaceVariant)),
+                ),
+                const SizedBox(height: 16),
+                Center(
+                  child: TextButton.icon(
+                    key: const Key('importRcloneConf'),
+                    icon: const Icon(Icons.file_open),
+                    label: const Text('Already use rclone? Import an rclone.conf'),
+                    onPressed: () async {
+                      final imported = await importRcloneConfFlow(context, environment.vault);
+                      if (imported != null) ref.invalidate(setupStatusProvider);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StepCard extends StatelessWidget {
+  const _StepCard({required this.number, required this.title, required this.done, required this.child});
+
+  final int number;
+  final String title;
+  final bool done;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.topCenter,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _StepHeader(number: 1, title: 'Connect your storage', done: status.hasStorage),
-              if (!status.hasStorage)
-                _StorageStep(vault: environment.vault, onDone: () => ref.invalidate(setupStatusProvider))
-              else
-                Text(switch (status.storageKind) {
-                  StorageKind.googleDrive => 'Google Drive connected (client ${status.clientId ?? ''}).',
-                  StorageKind.localFolder => 'Using a local folder instead of Google Drive.',
-                  _ => 'Storage "${status.storageRemote}" configured.',
-                }),
-              const SizedBox(height: 32),
-              _StepHeader(number: 2, title: 'Create or open your vault', done: status.hasVault),
-              if (status.hasStorage)
-                _VaultStep(
-                  vault: environment.vault,
-                  status: status,
-                  localFolderBase: p.join(environment.supportDir.path, 'local-storage'),
-                  onDone: () => ref.invalidate(setupStatusProvider),
-                ),
-              const SizedBox(height: 32),
-              const Divider(),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  key: const Key('importRcloneConf'),
-                  icon: const Icon(Icons.file_open),
-                  label: const Text('Already use rclone? Import an rclone.conf'),
-                  onPressed: () async {
-                    final imported = await importRcloneConfFlow(context, environment.vault);
-                    if (imported != null) ref.invalidate(setupStatusProvider);
-                  },
-                ),
-              ),
+              _StepHeader(number: number, title: title, done: done),
+              child,
             ],
           ),
         ),
@@ -79,7 +137,7 @@ class _StepHeader extends StatelessWidget {
         children: [
           CircleAvatar(radius: 14, child: done ? const Icon(Icons.check, size: 16) : Text('$number')),
           const SizedBox(width: 12),
-          Text(title, style: Theme.of(context).textTheme.titleLarge),
+          Expanded(child: Text(title, style: Theme.of(context).textTheme.titleLarge)),
         ],
       ),
     );
@@ -226,6 +284,7 @@ class _VaultStepState extends State<_VaultStep> {
               : 'Open a folder encrypted with rclone crypt (this app, rclone, RSAF, Round Sync…) '
                     'using the same password and salt.',
         ),
+        const SizedBox(height: 12),
         TextField(
           key: const Key('vaultFolderField'),
           controller: _folder,
@@ -233,12 +292,14 @@ class _VaultStepState extends State<_VaultStep> {
             labelText: widget.status.storageKind == StorageKind.localFolder ? 'Folder path' : 'Folder in Google Drive',
           ),
         ),
+        const SizedBox(height: 12),
         TextField(
           key: const Key('vaultPasswordField'),
           controller: _password,
           obscureText: true,
           decoration: const InputDecoration(labelText: 'Vault password'),
         ),
+        if (creating) const SizedBox(height: 12),
         if (creating)
           TextField(
             key: const Key('vaultPasswordConfirmationField'),
@@ -246,6 +307,7 @@ class _VaultStepState extends State<_VaultStep> {
             obscureText: true,
             decoration: const InputDecoration(labelText: 'Repeat vault password'),
           ),
+        const SizedBox(height: 12),
         TextField(
           key: const Key('vaultSaltField'),
           controller: _salt,

@@ -24,77 +24,91 @@ class SettingsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
         children: [
-          const _SectionTitle('Storage'),
-          ListTile(
-            leading: const Icon(Icons.cloud),
-            title: Text(switch (status?.storageKind) {
-              StorageKind.googleDrive => 'Google Drive',
-              StorageKind.localFolder => 'Local folder',
-              _ => status?.storageRemote ?? 'Not configured',
-            }),
-            subtitle: status?.clientId == null ? null : Text('OAuth client: ${status!.clientId}'),
-          ),
-          if (status?.storageKind == StorageKind.googleDrive)
+          _Section('Storage', [
             ListTile(
-              key: const Key('changeOAuthClient'),
-              leading: const Icon(Icons.key),
-              title: const Text('Change OAuth client ID / secret'),
-              subtitle: const Text('Signs in again: Google tokens belong to one client.'),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) =>
-                      _ChangeClientScreen(vault: environment.vault, initialClientId: status?.clientId ?? ''),
+              leading: const Icon(Icons.cloud),
+              title: Text(switch (status?.storageKind) {
+                StorageKind.googleDrive => 'Google Drive',
+                StorageKind.localFolder => 'Local folder',
+                _ => status?.storageRemote ?? 'Not configured',
+              }),
+              subtitle: status?.clientId == null ? null : Text('OAuth client: ${status!.clientId}'),
+            ),
+            if (status?.storageKind == StorageKind.googleDrive)
+              ListTile(
+                key: const Key('changeOAuthClient'),
+                leading: const Icon(Icons.key),
+                title: const Text('Change OAuth client ID / secret'),
+                subtitle: const Text('Signs in again: Google tokens belong to one client.'),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        _ChangeClientScreen(vault: environment.vault, initialClientId: status?.clientId ?? ''),
+                  ),
                 ),
               ),
+            ListTile(
+              leading: const Icon(Icons.help_outline),
+              title: const Text('How to create a Google OAuth client'),
+              onTap: () => launchUrl(Uri.parse(oauthClientDocsUrl), mode: LaunchMode.externalApplication),
             ),
-          ListTile(
-            leading: const Icon(Icons.help_outline),
-            title: const Text('How to create a Google OAuth client'),
-            onTap: () => launchUrl(Uri.parse(oauthClientDocsUrl), mode: LaunchMode.externalApplication),
-          ),
-          const _SectionTitle('rclone configuration'),
-          ListTile(
-            key: const Key('exportRcloneConf'),
-            leading: const Icon(Icons.upload_file),
-            title: const Text('Export rclone.conf'),
-            subtitle: const Text('Open this vault with the rclone CLI, RSAF or Round Sync.'),
-            onTap: () => exportRcloneConfFlow(context, environment.vault),
-          ),
-          ListTile(
-            leading: const Icon(Icons.file_open),
-            title: const Text('Import rclone.conf'),
-            subtitle: const Text('Replaces remotes with the same names.'),
-            onTap: () async {
-              final imported = await importRcloneConfFlow(context, environment.vault);
-              if (imported != null) ref.invalidate(setupStatusProvider);
-            },
-          ),
-          const _SectionTitle('About'),
-          ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: const Text('CryptDrive'),
-            subtitle: Text('rclone $rcloneVersion · vault format: rclone crypt'),
-          ),
+          ]),
+          _Section('rclone configuration', [
+            ListTile(
+              key: const Key('exportRcloneConf'),
+              leading: const Icon(Icons.upload_file),
+              title: const Text('Export rclone.conf'),
+              subtitle: const Text('Open this vault with the rclone CLI, RSAF or Round Sync.'),
+              onTap: () => exportRcloneConfFlow(context, environment.vault),
+            ),
+            ListTile(
+              leading: const Icon(Icons.file_open),
+              title: const Text('Import rclone.conf'),
+              subtitle: const Text('Replaces remotes with the same names.'),
+              onTap: () async {
+                final imported = await importRcloneConfFlow(context, environment.vault);
+                if (imported != null) ref.invalidate(setupStatusProvider);
+              },
+            ),
+          ]),
+          _Section('About', [
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('CryptDrive'),
+              subtitle: Text('rclone $rcloneVersion · vault format: rclone crypt'),
+            ),
+          ]),
         ],
       ),
     );
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.title);
+class _Section extends StatelessWidget {
+  const _Section(this.title, this.tiles);
 
   final String title;
+  final List<Widget> tiles;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary),
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 20, 4, 8),
+          child: Text(
+            title,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary),
+          ),
+        ),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: Column(children: tiles),
+        ),
+      ],
     );
   }
 }

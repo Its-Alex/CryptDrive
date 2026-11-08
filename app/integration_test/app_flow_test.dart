@@ -61,6 +61,9 @@ void main() {
       if (stored is File) expect(String.fromCharCodes(stored.readAsBytesSync()).contains('oak tree'), isFalse);
     }
 
+    await tester.tap(find.byKey(const Key('addButton')));
+    await pumpUntilFound(tester, find.byKey(const Key('newFolder')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('newFolder')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('askTextField')), 'Photos');
@@ -94,6 +97,13 @@ void main() {
 
     await tester.tap(find.text('Vault'));
     await pumpUntilFound(tester, find.byKey(const Key('entry:Photos')));
+    await tester.enterText(find.byKey(const Key('searchField')), 'phot');
+    await pumpUntilFound(tester, find.byKey(const Key('result:Photos')));
+    await tester.tap(find.byTooltip('Clear'));
+    await pumpUntilFound(tester, find.byKey(const Key('entry:Photos')));
+
+    await tester.tap(find.byKey(const Key('openRecent')));
+    await pumpUntilFound(tester, find.text('Files you open or upload show up here.'));
     await tester.tap(find.byKey(const Key('openSettings')));
     await pumpUntilFound(tester, find.textContaining('rclone v1.76.0'));
     final exported = await environment.vault.exportRcloneConf();
@@ -120,6 +130,8 @@ Future<void> chooseMenuAction(WidgetTester tester, String entryPath, String acti
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(Key('menu:$entryPath')));
   await pumpUntilFound(tester, find.text(action));
+  await tester.pumpAndSettle();
+  await tester.ensureVisible(find.text(action).last);
   await tester.pumpAndSettle();
   await tester.tap(find.text(action).last);
   await tester.pumpAndSettle();
