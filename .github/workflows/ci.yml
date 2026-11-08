@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -91,11 +92,16 @@ jobs:
         run: mise run native:android
       - name: Build release APKs
         working-directory: app
-        run: flutter build apk --release --split-per-abi
+        run: |
+          flutter build apk --release --split-per-abi
+          for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
+            abi="${apk##*/app-}"
+            mv "$apk" "build/CryptDrive-android-${abi%-release.apk}.apk"
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: cryptdrive-android-apks
-          path: app/build/app/outputs/flutter-apk/*-release.apk
+          path: app/build/CryptDrive-android-*.apk
           if-no-files-found: error
 
   android-emulator:
@@ -147,16 +153,19 @@ jobs:
           install_args: go flutter
       - name: Build cryptdrive.dll
         run: native/build.sh windows-x64
-      - name: Build and package (msix)
+      - name: Build and package (msix, zip)
         working-directory: app
         run: |
           flutter build windows --release
           dart run msix:create
+          mv build/windows/x64/runner/Release/CryptDrive.msix build/CryptDrive-windows-x64.msix
+          (cd build/windows/x64/runner/Release && 7z a -tzip ../../../../CryptDrive-windows-x64.zip . > /dev/null)
       - uses: actions/upload-artifact@v7
         with:
           name: cryptdrive-windows
           path: |
-            app/build/windows/x64/runner/Release/
+            app/build/CryptDrive-windows-x64.msix
+            app/build/CryptDrive-windows-x64.zip
           if-no-files-found: error
 
   macos:
@@ -174,11 +183,11 @@ jobs:
         working-directory: app
         run: |
           flutter build macos --release
-          hdiutil create -volname CryptDrive -srcfolder build/macos/Build/Products/Release/CryptDrive.app -ov -format UDZO build/CryptDrive.dmg
+          hdiutil create -volname CryptDrive -srcfolder build/macos/Build/Products/Release/CryptDrive.app -ov -format UDZO build/CryptDrive-macos.dmg
       - uses: actions/upload-artifact@v7
         with:
           name: cryptdrive-macos-dmg
-          path: app/build/CryptDrive.dmg
+          path: app/build/CryptDrive-macos.dmg
           if-no-files-found: error
 
   ios:
@@ -202,3 +211,29 @@ jobs:
           name: cryptdrive-ios-unsigned
           path: app/build/CryptDrive-unsigned-ios.zip
           if-no-files-found: error
+
+  release:
+    name: GitHub release
+    # Tier 1 must pass; experimental platforms are attached when they built.
+    if: >-
+      !cancelled() && startsWith(github.ref, 'refs/tags/v')
+      && needs.native.result == 'success' && needs.linux.result == 'success'
+      && needs.android.result == 'success' && needs.android-emulator.result == 'success'
+    needs: [native, linux, android, android-emulator, windows, macos, ios]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          (cd dist && sha256sum * > SHA256SUMS)
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "CryptDrive $GITHUB_REF_NAME" --notes-file .github/release-notes.md --generate-notes --prerelease
