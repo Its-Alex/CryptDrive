@@ -40,4 +40,5 @@ msix_config:
   logo_path: android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
   capabilities: internetClient,privateNetworkClientServer
   build_windows: false
+  install_certificate: false
   output_name: CryptDrive
