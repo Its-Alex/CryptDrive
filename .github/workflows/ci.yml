@@ -1,0 +1,192 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NDK_VERSION: 28.2.13676358
+  # Each job installs only the tools it needs; `mise run` would otherwise install all of mise.toml.
+  MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+jobs:
+  native:
+    name: Native bridge (Go tests)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: go rclone
+      - name: gofmt
+        working-directory: native
+        run: test -z "$(gofmt -l .)"
+      - run: mise run test:native
+
+  linux:
+    name: Linux (tier 1)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libsecret-1-dev libegl1 libgles2 libgl1-mesa-dri dbus gnupg
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: go flutter cmake ninja conda:clang rclone
+      - name: Build libcryptdrive.so
+        run: mise run native:linux
+      - name: Analyze
+        working-directory: app
+        run: |
+          flutter pub get
+          dart format --set-exit-if-changed lib test integration_test packages/cryptdrive_native/lib packages/cryptdrive_native/test
+          flutter analyze
+          (cd packages/cryptdrive_native && flutter analyze)
+      - name: Unit tests and encrypted round-trip (local crypt remote, rclone CLI compatibility)
+        run: mise run test:app
+      - name: App flow on the Linux desktop (headless Wayland + Secret Service)
+        working-directory: app
+        run: ../tools/linux-headless.sh flutter test integration_test/app_flow_test.dart -d linux
+      - name: Build release bundle and AppImage
+        working-directory: app
+        run: |
+          flutter build linux --release
+          ../tools/package-appimage.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cryptdrive-linux-x86_64-appimage
+          path: app/build/CryptDrive-x86_64.AppImage
+          if-no-files-found: error
+
+  android:
+    name: Android (tier 1)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: go flutter java android-sdk
+      - name: Android SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager --install "platform-tools" "platforms;android-36" "platforms/android-37.0" "build-tools;36.0.0" "ndk;${NDK_VERSION}"
+      - name: Build libcryptdrive.so for every ABI
+        run: mise run native:android
+      - name: Build release APKs
+        working-directory: app
+        run: flutter build apk --release --split-per-abi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cryptdrive-android-apks
+          path: app/build/app/outputs/flutter-apk/*-release.apk
+          if-no-files-found: error
+
+  android-emulator:
+    name: Android emulator app flow (tier 1)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: go flutter java android-sdk
+      - name: Android SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager --install "platform-tools" "platforms;android-36" "platforms/android-37.0" "build-tools;36.0.0" "ndk;${NDK_VERSION}" "emulator" "system-images;android-30;default;x86_64"
+      - name: Build libcryptdrive.so (x86_64 emulator ABI)
+        run: native/build.sh android x86_64
+      - name: Run the app flow integration test on an emulator
+        run: tools/android-integration-test.sh integration_test/app_flow_test.dart
+
+  windows:
+    name: Windows (tier 2, experimental)
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc
+      - name: Put MinGW gcc on PATH for cgo
+        shell: msys2 {0}
+        run: cygpath -w /ucrt64/bin >> "$GITHUB_PATH"
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: go flutter
+      - name: Build cryptdrive.dll
+        run: native/build.sh windows-x64
+      - name: Build and package (msix)
+        working-directory: app
+        run: |
+          flutter build windows --release
+          dart run msix:create
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cryptdrive-windows
+          path: |
+            app/build/windows/x64/runner/Release/
+          if-no-files-found: error
+
+  macos:
+    name: macOS (tier 3, experimental)
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: go flutter
+      - name: Build universal libcryptdrive.dylib
+        run: mise run native:macos
+      - name: Build and package (dmg)
+        working-directory: app
+        run: |
+          flutter build macos --release
+          hdiutil create -volname CryptDrive -srcfolder build/macos/Build/Products/Release/CryptDrive.app -ov -format UDZO build/CryptDrive.dmg
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cryptdrive-macos-dmg
+          path: app/build/CryptDrive.dmg
+          if-no-files-found: error
+
+  ios:
+    name: iOS (tier 3, experimental, unsigned)
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: go flutter
+      - name: Build libcryptdrive.a (c-archive)
+        run: mise run native:ios
+      - name: Build unsigned app
+        working-directory: app
+        run: |
+          flutter build ios --release --no-codesign
+          cd build/ios/iphoneos && zip -qr ../../CryptDrive-unsigned-ios.zip Runner.app
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cryptdrive-ios-unsigned
+          path: app/build/CryptDrive-unsigned-ios.zip
+          if-no-files-found: error
