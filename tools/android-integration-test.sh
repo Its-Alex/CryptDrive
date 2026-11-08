@@ -7,6 +7,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
+export PATH="$ANDROID_HOME/platform-tools:$PATH"
 test_file="${1:-integration_test/app_flow_test.dart}"
 avd="${2:-cryptdrive_api30}"
 package=io.github.itsalex.cryptdrive

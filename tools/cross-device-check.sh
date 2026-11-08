@@ -5,6 +5,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
+export PATH="$ANDROID_HOME/platform-tools:$PATH"
 package=io.github.itsalex.cryptdrive
 work="$(mktemp -d "${TMPDIR:-/tmp}/cryptdrive-cross-device.XXXXXX")"
 trap 'rm -r "$work"' EXIT
