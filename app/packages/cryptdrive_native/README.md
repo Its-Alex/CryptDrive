@@ -5,5 +5,5 @@ Dart FFI bindings to CryptDrive's native library (rclone, built from
 each platform; build it with `native/build.sh` first.
 
 - `CryptDriveBindings`: synchronous mapping of the C API.
-- `Rclone`: async facade, each call on its own isolate; `runJob` for
-  `_async` rc jobs with progress.
+- `Rclone`: async facade, each call on its own isolate; `runJob` for long
+  calls, with progress from their `core/stats` group.

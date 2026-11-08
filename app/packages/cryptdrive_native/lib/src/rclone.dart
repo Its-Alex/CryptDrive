@@ -15,7 +15,7 @@ class RcloneException implements Exception {
   String toString() => 'rclone $method failed ($status): $message';
 }
 
-/// Progress of an async rc job, from `job/status` and `core/stats`.
+/// Transfer progress of a long rc call, from `core/stats`.
 class JobProgress {
   const JobProgress({required this.bytes, required this.totalBytes});
 
@@ -63,36 +63,36 @@ class Rclone {
     return decoded;
   }
 
-  /// Runs [method] as an async rc job, polling until it finishes.
+  static var _nextStatsGroup = 0;
+
+  /// Runs a long rc [method] on its own isolate and reports transfer progress.
   ///
-  /// Returns the job's output. [onProgress] gets transfer progress of the job's stats group.
+  /// The call is synchronous on that isolate, so it returns the moment rclone
+  /// finishes; [onProgress] polls `core/stats` for the call's stats group meanwhile.
   Future<Map<String, dynamic>> runJob(
     String method,
     Map<String, dynamic> params, {
     void Function(JobProgress progress)? onProgress,
-    Duration pollInterval = const Duration(milliseconds: 250),
+    Duration pollInterval = const Duration(milliseconds: 200),
   }) async {
-    final started = await call(method, {...params, '_async': true});
-    final jobId = started['jobid'] as int;
-    while (true) {
-      final status = await call('job/status', {'jobid': jobId});
-      if (status['finished'] == true) {
-        if (status['success'] != true) {
-          throw RcloneException(method, 500, status['error']?.toString() ?? 'job failed');
-        }
-        return (status['output'] as Map<String, dynamic>?) ?? {};
-      }
-      if (onProgress != null) {
-        final stats = await call('core/stats', {'group': 'job/$jobId'});
-        onProgress(
-          JobProgress(
-            bytes: (stats['bytes'] as num?)?.toInt() ?? 0,
-            totalBytes: (stats['totalBytes'] as num?)?.toInt() ?? 0,
-          ),
-        );
-      }
-      await Future<void>.delayed(pollInterval);
+    final group = 'cryptdrive/${_nextStatsGroup++}';
+    final result = call(method, {...params, '_group': group});
+    if (onProgress == null) return result;
+
+    var finished = false;
+    result.whenComplete(() => finished = true).ignore();
+    while (!finished) {
+      await Future.any([result, Future<void>.delayed(pollInterval)]).catchError((_) => null);
+      if (finished) break;
+      final stats = await call('core/stats', {'group': group});
+      onProgress(
+        JobProgress(
+          bytes: (stats['bytes'] as num?)?.toInt() ?? 0,
+          totalBytes: (stats['totalBytes'] as num?)?.toInt() ?? 0,
+        ),
+      );
     }
+    return result;
   }
 
   /// Stops in-flight jobs, then finalizes the library.
