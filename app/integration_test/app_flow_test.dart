@@ -175,7 +175,9 @@ void main() {
     );
     await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-one.txt')));
     await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-two.txt')));
-    await tester.longPress(find.byKey(const Key('entry:dropped-one.txt')));
+    await tester.tap(find.byKey(const Key('startSelecting')));
+    await pumpUntilFound(tester, find.text('0 selected'));
+    await tester.tap(find.byKey(const Key('entry:dropped-one.txt')));
     await pumpUntilFound(tester, find.text('1 selected'));
     await tester.tap(find.byKey(const Key('entry:dropped-two.txt')));
     await pumpUntilFound(tester, find.text('2 selected'));

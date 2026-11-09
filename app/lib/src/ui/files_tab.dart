@@ -41,11 +41,14 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   final _selection = <String, VaultEntry>{};
   String? _selectionAnchor;
 
+  /// Set by the Select button, so selection can start without a long press.
+  bool _selectionMode = false;
+
   /// Holds keyboard focus for the selection shortcuts (Escape, Ctrl+A, Delete).
   final _shortcutsFocus = FocusNode(debugLabel: 'files');
   List<VaultEntry> _visibleEntries = const [];
 
-  bool get _selecting => _selection.isNotEmpty;
+  bool get _selecting => _selectionMode || _selection.isNotEmpty;
   bool _dragging = false;
   StreamSubscription<List<SharedMediaFile>>? _sharedFiles;
 
@@ -76,6 +79,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   void _open(String directory) {
     _search.clear();
     _selection.clear();
+    _selectionMode = false;
     setState(() {
       _directory = directory;
       _query = '';
@@ -273,7 +277,13 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   void _clearSelection() => setState(() {
     _selection.clear();
     _selectionAnchor = null;
+    _selectionMode = false;
   });
+
+  void _startSelecting() {
+    _shortcutsFocus.requestFocus();
+    setState(() => _selectionMode = true);
+  }
 
   List<VaultEntry> get _selectedEntries => _selection.values.toList();
 
@@ -383,7 +393,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
                 const SingleActivator(LogicalKeyboardKey.keyA, control: true): _selectAll,
                 const SingleActivator(LogicalKeyboardKey.keyA, meta: true): _selectAll,
                 const SingleActivator(LogicalKeyboardKey.delete): () {
-                  if (_selecting) _deleteSelected();
+                  if (_selection.isNotEmpty) _deleteSelected();
                 },
               },
               child: Focus(
@@ -464,6 +474,12 @@ class _FilesTabState extends ConsumerState<FilesTab> {
               },
             ),
           ),
+          IconButton(
+            key: const Key('startSelecting'),
+            tooltip: 'Select',
+            icon: const Icon(Icons.checklist),
+            onPressed: _startSelecting,
+          ),
           IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: _refresh),
         ],
       ),
@@ -472,6 +488,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
 
   Widget _selectionBar() {
     final count = _selection.length;
+    final hasSelection = count > 0;
     final filesOnly = _selectionHasOnlyFiles;
     return Padding(
       key: const ValueKey('selectionBar'),
@@ -496,14 +513,14 @@ class _FilesTabState extends ConsumerState<FilesTab> {
             ),
             IconButton(tooltip: 'Select all', icon: const Icon(Icons.select_all), onPressed: _selectAll),
             // Phones save through the share sheet; there is no folder to pick there.
-            if (filesOnly && !_onPhone)
+            if (filesOnly && hasSelection && !_onPhone)
               IconButton(
                 key: const Key('saveSelected'),
                 tooltip: kIsWeb ? 'Download' : 'Save decrypted copies',
                 icon: const Icon(Icons.download_outlined),
                 onPressed: _saveSelected,
               ),
-            if (filesOnly && canShareFiles)
+            if (filesOnly && hasSelection && canShareFiles)
               IconButton(
                 key: const Key('shareSelected'),
                 tooltip: 'Share',
@@ -514,13 +531,13 @@ class _FilesTabState extends ConsumerState<FilesTab> {
               key: const Key('moveSelected'),
               tooltip: 'Move',
               icon: const Icon(Icons.drive_file_move_outline),
-              onPressed: _moveSelected,
+              onPressed: hasSelection ? _moveSelected : null,
             ),
             IconButton(
               key: const Key('deleteSelected'),
               tooltip: 'Delete',
               icon: const Icon(Icons.delete_outline),
-              onPressed: _deleteSelected,
+              onPressed: hasSelection ? _deleteSelected : null,
             ),
           ],
         ),
