@@ -13,4 +13,4 @@ Pre-release: everything except live Google sign-in is tested (see [docs/manual-v
 
 Before the first launch, create your own Google OAuth client: [docs/google-oauth-client.md](https://github.com/Its-Alex/CryptDrive/blob/main/docs/google-oauth-client.md). `SHA256SUMS` lists the checksums of every file.
 
-Web app as a container image (static files only, port 8080): `docker run -p 8080:8080 ghcr.io/its-alex/cryptdrive-web:latest` (or the tag of this release without its `v`), then put it behind an HTTPS reverse proxy.
+Try the web app at https://its-alex.github.io/CryptDrive/ (needs your own Web application OAuth client, see [docs/web.md](https://github.com/Its-Alex/CryptDrive/blob/main/docs/web.md#google-oauth-client-for-the-web)), or self-host it as a container image (static files only, port 8080): `docker run -p 8080:8080 ghcr.io/its-alex/cryptdrive-web:latest` (or the tag of this release without its `v`), then put it behind an HTTPS reverse proxy.

@@ -28,6 +28,26 @@ behind a reverse proxy that terminates **HTTPS** (Caddy, Traefik, nginx…):
 browsers only allow some of what the app uses on secure origins, and Google
 only accepts `https://` redirect URIs (except `http://localhost`).
 
+### GitHub Pages
+
+Each release is published at **https://its-alex.github.io/CryptDrive/**.
+
+For a fork, at `https://<owner>.github.io/<repository>/`:
+
+1. GitHub Pages needs a **public** repository on GitHub Free (private
+   repositories need a paid plan, and the site is public either way).
+2. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
+3. **Settings → Secrets and variables → Actions → Variables**: add
+   `DEPLOY_PAGES` = `true`.
+4. **Settings → Environments → github-pages**: allow deployments from tags
+   matching `v*` (by default only the default branch may deploy).
+5. Push a `v*` tag: the `GitHub Pages` job deploys that release.
+
+Pages can't send custom headers, so the Content Security Policy also sits in
+a `<meta>` tag in `index.html`. Register `https://its-alex.github.io` as
+JavaScript origin and `https://its-alex.github.io/CryptDrive/oauth_callback.html`
+as redirect URI of your Web application OAuth client.
+
 ### Any static host
 
 The release also ships `CryptDrive-web.tar.gz`. Serve its contents as-is

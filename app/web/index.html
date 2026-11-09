@@ -7,6 +7,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="CryptDrive: Google Drive, encrypted in your browser with rclone crypt.">
   <meta name="referrer" content="no-referrer">
+  <!-- Also set as a header by deploy/web/nginx.conf; static hosts without custom headers (GitHub Pages) rely on this copy. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://www.googleapis.com https://oauth2.googleapis.com https://*.googleusercontent.com https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data: https://fonts.gstatic.com; base-uri 'self'; form-action 'none'">
 
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
