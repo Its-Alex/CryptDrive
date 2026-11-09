@@ -34,6 +34,10 @@ jobs:
       - name: gofmt
         working-directory: native
         run: test -z "$(gofmt -l .)"
+      - name: Third-party license list is up to date
+        run: |
+          tools/generate-licenses.sh
+          git diff --exit-code app/assets/licenses/go.txt
       - run: mise run test:native
 
   linux:

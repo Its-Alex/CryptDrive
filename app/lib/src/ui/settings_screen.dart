@@ -114,6 +114,18 @@ class SettingsScreen extends ConsumerWidget {
               title: const Text('CryptDrive'),
               subtitle: Text('rclone $rcloneVersion · vault format: rclone crypt'),
             ),
+            ListTile(
+              key: const Key('openSourceLicenses'),
+              leading: const Icon(Icons.gavel_outlined),
+              title: const Text('Open-source licenses'),
+              subtitle: const Text('CryptDrive is MIT-licensed; it includes rclone and the packages listed here.'),
+              onTap: () => showLicensePage(
+                context: context,
+                applicationName: 'CryptDrive',
+                applicationVersion: 'rclone $rcloneVersion',
+                applicationLegalese: 'MIT License. Copyright (c) 2026 Alexandre Marre.',
+              ),
+            ),
           ]),
         ],
       ),

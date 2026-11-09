@@ -52,4 +52,5 @@ Decisions taken during implementation are listed in
 
 ## License
 
-[MIT](LICENSE). rclone is MIT-licensed as well.
+[MIT](LICENSE). rclone is MIT-licensed as well; the licenses of everything
+else the apps include are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

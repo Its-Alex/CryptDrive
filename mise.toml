@@ -56,3 +56,7 @@ run = "native/build.sh web"
 description = "Round-trip through cryptdrive.wasm under Node (needs native:web)"
 depends = ["native:web"]
 run = "node native/wasm/smoke_test.mjs app/web/cryptdrive"
+
+[tasks.licenses]
+description = "Regenerate app/assets/licenses/go.txt from the Go modules"
+run = "tools/generate-licenses.sh"
