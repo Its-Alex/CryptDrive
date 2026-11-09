@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:cryptdrive_native/cryptdrive_native.dart';
+import 'package:cryptdrive_native/ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final libraryPath = File('linux/lib/libcryptdrive.so').absolute.path;
