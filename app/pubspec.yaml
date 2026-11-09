@@ -11,6 +11,8 @@ dependencies:
     sdk: flutter
   cryptdrive_native:
     path: packages/cryptdrive_native
+  cross_file: ^0.3.5+5
+  desktop_drop: ^0.8.0
   file_picker: ^13.3.2
   flutter_riverpod: ^3.5.0
   flutter_secure_storage: ^11.2.0

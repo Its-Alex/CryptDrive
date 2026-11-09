@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:cryptdrive/src/app.dart';
 import 'package:cryptdrive/src/core/bootstrap.dart';
 import 'package:cryptdrive/src/state/providers.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -153,6 +154,35 @@ void main() {
     await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
     await tester.tap(find.byTooltip('Clear'));
     await pumpUntilGone(tester, find.byKey(const Key('entry:Photos')));
+
+    // Drag and drop: the OS hands over paths, staged and uploaded like a picked file.
+    final dropDir = Directory(p.join(runDir.path, 'dropped'))..createSync();
+    final first = File(p.join(dropDir.path, 'dropped-one.txt'))..writeAsStringSync('first drop');
+    final second = File(p.join(dropDir.path, 'dropped-two.txt'))..writeAsStringSync('second drop');
+    final dropTarget = tester.widget<DropTarget>(find.byType(DropTarget));
+    dropTarget.onDragEntered!(DropEventDetails(localPosition: Offset.zero, globalPosition: Offset.zero));
+    await tester.pump();
+    expect(find.byKey(const Key('dropOverlay')), findsOneWidget);
+    dropTarget.onDragExited!(DropEventDetails(localPosition: Offset.zero, globalPosition: Offset.zero));
+    await tester.pump();
+    expect(find.byKey(const Key('dropOverlay')), findsNothing);
+    dropTarget.onDragDone!(
+      DropDoneDetails(
+        files: [DropItemFile(first.path), DropItemFile(second.path)],
+        localPosition: Offset.zero,
+        globalPosition: Offset.zero,
+      ),
+    );
+    await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-one.txt')));
+    await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-two.txt')));
+    await tester.longPress(find.byKey(const Key('entry:dropped-one.txt')));
+    await pumpUntilFound(tester, find.text('1 selected'));
+    await tester.tap(find.byKey(const Key('entry:dropped-two.txt')));
+    await pumpUntilFound(tester, find.text('2 selected'));
+    await tester.tap(find.byKey(const Key('deleteSelected')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirmButton')));
+    await pumpUntilGone(tester, find.byKey(const Key('entry:dropped-one.txt')));
 
     await tester.tap(find.byKey(const Key('openRecent')));
     await pumpUntilFound(tester, find.text('Files you open or upload show up here.'));

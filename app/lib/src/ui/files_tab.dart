@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:cross_file/cross_file.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -17,7 +19,10 @@ import 'file_actions.dart';
 import 'widgets.dart';
 
 class FilesTab extends ConsumerStatefulWidget {
-  const FilesTab({super.key});
+  const FilesTab({super.key, this.active = true});
+
+  /// False while another tab covers the list, so the drop target stops listening.
+  final bool active;
 
   @override
   ConsumerState<FilesTab> createState() => _FilesTabState();
@@ -41,6 +46,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   List<VaultEntry> _visibleEntries = const [];
 
   bool get _selecting => _selection.isNotEmpty;
+  bool _dragging = false;
   StreamSubscription<List<SharedMediaFile>>? _sharedFiles;
 
   VaultService get _vault => ref.read(environmentProvider).requireValue.vault;
@@ -119,21 +125,67 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   Future<void> _pickAndUpload() async {
     final picked = await FilePicker.pickFiles(dialogTitle: 'Upload to vault');
     if (picked.isEmpty || !mounted) return;
+    await _uploadFiles([for (final file in picked) file.xFile]);
+  }
+
+  Future<void> _onDropped(DropDoneDetails details) async {
+    if (mounted) setState(() => _dragging = false);
+    final files = <XFile>[];
+    var folders = 0;
+    for (final item in details.files) {
+      // Linux delivers a directory as a file path, macOS as DropItemDirectory.
+      final isFolder =
+          item is DropItemDirectory ||
+          (!kIsWeb && await FileSystemEntity.type(item.path) == FileSystemEntityType.directory);
+      if (isFolder) {
+        folders++;
+      } else {
+        files.add(item);
+      }
+    }
+    if (files.isEmpty) {
+      if (folders > 0 && mounted) {
+        showMessage(context, 'Folders can\'t be dropped: open one and drop the files inside.');
+      }
+      return;
+    }
+    if (folders > 0 && mounted) {
+      showMessage(context, 'Skipped $folders folder(s): drop files, not folders.');
+    }
+    final bookmarks = <DropItemFile>[];
+    try {
+      for (final file in files.whereType<DropItemFile>()) {
+        final bookmark = file.extraAppleBookmark;
+        if (bookmark != null &&
+            bookmark.isNotEmpty &&
+            await DesktopDrop.instance.startAccessingSecurityScopedResource(bookmark: bookmark)) {
+          bookmarks.add(file);
+        }
+      }
+      await _uploadFiles(files);
+    } finally {
+      for (final file in bookmarks) {
+        await DesktopDrop.instance.stopAccessingSecurityScopedResource(bookmark: file.extraAppleBookmark!);
+      }
+    }
+  }
+
+  Future<void> _uploadFiles(List<XFile> files) async {
     if (kIsWeb) {
-      final files = [for (final file in picked) (name: file.name, bytes: await file.xFile.readAsBytes())];
-      if (mounted) await _actions.uploadPicked(files, _directory);
+      final payload = [for (final file in files) (name: file.name, bytes: await file.readAsBytes())];
+      if (mounted) await _actions.uploadPicked(payload, _directory);
       return;
     }
     final stagingDir = await Directory.systemTemp.createTemp('cryptdrive-upload');
     try {
       final staged = <File>[];
-      for (final file in picked) {
+      for (final file in files) {
         final localPath = file.path;
-        if (localPath != null && await File(localPath).exists()) {
+        if (localPath.isNotEmpty && await File(localPath).exists()) {
           staged.add(File(localPath));
         } else {
           final copy = File(p.join(stagingDir.path, file.name));
-          await file.xFile.saveTo(copy.path);
+          await file.saveTo(copy.path);
           staged.add(copy);
         }
       }
@@ -314,62 +366,77 @@ class _FilesTabState extends ConsumerState<FilesTab> {
         if (searching) return _open(_directory);
         _open(parentVaultPath(_directory));
       },
-      child: CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.escape): _clearSelection,
-          const SingleActivator(LogicalKeyboardKey.keyA, control: true): _selectAll,
-          const SingleActivator(LogicalKeyboardKey.keyA, meta: true): _selectAll,
-          const SingleActivator(LogicalKeyboardKey.delete): () {
-            if (_selecting) _deleteSelected();
-          },
+      child: DropTarget(
+        enable: widget.active && (ModalRoute.of(context)?.isCurrent ?? true),
+        onDragEntered: (_) {
+          if (mounted) setState(() => _dragging = true);
         },
-        child: Focus(
-          focusNode: _shortcutsFocus,
-          autofocus: true,
-          child: Scaffold(
-            body: SafeArea(
-              bottom: false,
-              child: Column(
-                children: [
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 150),
-                    child: _selecting ? _selectionBar() : _searchHeader(),
-                  ),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 200),
-                    child: searching
-                        ? const SizedBox(width: double.infinity)
-                        : _Breadcrumbs(directory: _directory, onOpen: _open),
-                  ),
-                  Expanded(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 220),
-                      switchInCurve: Curves.easeOutCubic,
-                      transitionBuilder: (child, animation) => FadeTransition(
-                        opacity: animation,
-                        child: SlideTransition(
-                          position: Tween(begin: const Offset(0.04, 0), end: Offset.zero).animate(animation),
-                          child: child,
+        onDragExited: (_) {
+          if (mounted) setState(() => _dragging = false);
+        },
+        onDragDone: _onDropped,
+        child: Stack(
+          children: [
+            CallbackShortcuts(
+              bindings: {
+                const SingleActivator(LogicalKeyboardKey.escape): _clearSelection,
+                const SingleActivator(LogicalKeyboardKey.keyA, control: true): _selectAll,
+                const SingleActivator(LogicalKeyboardKey.keyA, meta: true): _selectAll,
+                const SingleActivator(LogicalKeyboardKey.delete): () {
+                  if (_selecting) _deleteSelected();
+                },
+              },
+              child: Focus(
+                focusNode: _shortcutsFocus,
+                autofocus: true,
+                child: Scaffold(
+                  body: SafeArea(
+                    bottom: false,
+                    child: Column(
+                      children: [
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 150),
+                          child: _selecting ? _selectionBar() : _searchHeader(),
                         ),
-                      ),
-                      child: KeyedSubtree(
-                        key: ValueKey(searching ? 'search:$_query' : 'dir:$_directory'),
-                        child: searching ? _searchResults() : _folderContents(),
-                      ),
+                        AnimatedSize(
+                          duration: const Duration(milliseconds: 200),
+                          child: searching
+                              ? const SizedBox(width: double.infinity)
+                              : _Breadcrumbs(directory: _directory, onOpen: _open),
+                        ),
+                        Expanded(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 220),
+                            switchInCurve: Curves.easeOutCubic,
+                            transitionBuilder: (child, animation) => FadeTransition(
+                              opacity: animation,
+                              child: SlideTransition(
+                                position: Tween(begin: const Offset(0.04, 0), end: Offset.zero).animate(animation),
+                                child: child,
+                              ),
+                            ),
+                            child: KeyedSubtree(
+                              key: ValueKey(searching ? 'search:$_query' : 'dir:$_directory'),
+                              child: searching ? _searchResults() : _folderContents(),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
+                  floatingActionButton: _selecting
+                      ? null
+                      : FloatingActionButton(
+                          key: const Key('addButton'),
+                          tooltip: 'Add',
+                          onPressed: _showAddSheet,
+                          child: const Icon(Icons.add),
+                        ),
+                ),
               ),
             ),
-            floatingActionButton: _selecting
-                ? null
-                : FloatingActionButton(
-                    key: const Key('addButton'),
-                    tooltip: 'Add',
-                    onPressed: _showAddSheet,
-                    child: const Icon(Icons.add),
-                  ),
-          ),
+            if (_dragging) Positioned.fill(child: _DropOverlay(directory: _directory)),
+          ],
         ),
       ),
     );
@@ -556,6 +623,48 @@ class _FilesTabState extends ConsumerState<FilesTab> {
           },
         );
       },
+    );
+  }
+}
+
+class _DropOverlay extends StatelessWidget {
+  const _DropOverlay({required this.directory});
+
+  final String directory;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return IgnorePointer(
+      child: ColoredBox(
+        key: const Key('dropOverlay'),
+        color: scheme.scrim.withValues(alpha: 0.55),
+        child: Center(
+          child: Container(
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: scheme.primary, width: 2),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.file_download_outlined, size: 44, color: scheme.primary),
+                const SizedBox(height: 12),
+                Text('Drop to upload', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 6),
+                Text(
+                  'Encrypted and added to ${directory.isEmpty ? 'the vault root' : directory}.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

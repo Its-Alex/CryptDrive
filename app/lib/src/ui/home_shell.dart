@@ -24,7 +24,14 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    final body = IndexedStack(index: _tab, children: const [FilesTab(), RecentTab(), SettingsScreen()]);
+    final body = IndexedStack(
+      index: _tab,
+      children: [
+        FilesTab(active: _tab == 0),
+        const RecentTab(),
+        const SettingsScreen(),
+      ],
+    );
     final wide = MediaQuery.sizeOf(context).width >= 840;
     if (wide) {
       return Scaffold(

@@ -27,6 +27,8 @@ cd app && flutter run -d linux     # or run the AppImage from CI
 - [ ] Paste the client ID and secret, click **Sign in with Google**, accept in
       the browser, and the app moves on to step 2.
 - [ ] Create a vault (folder `CryptDrive`, a password).
+- [ ] Drag a file from the file manager onto the list: the overlay names the
+      folder, and the file uploads encrypted.
 - [ ] Open [drive.google.com](https://drive.google.com): the `CryptDrive`
       folder only contains encrypted names.
 
@@ -60,6 +62,8 @@ behind HTTPS, or on `http://localhost:8080` for a local check, and create a
 - [ ] Upload a file **larger than 8 MB** (rclone switches to Drive's
       resumable upload above that size, which needs the browser to read the
       `Location` header): it appears on the laptop.
+- [ ] Drag files from the desktop onto the browser tab: the overlay names the
+      folder, and the files upload into it.
 
 ## 6. rclone CLI compatibility
 
