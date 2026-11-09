@@ -47,7 +47,10 @@ It takes about five minutes. You need a Google account and a web browser.
 2. Application type: **Desktop app**. Name: anything.
 3. Click **Create**, then copy the **Client ID** and **Client secret**.
 
-Use the *Desktop app* type on every platform, including Android: CryptDrive
+For the **web app**, create a *Web application* client instead: see
+[web.md](web.md#google-oauth-client-for-the-web).
+
+Use the *Desktop app* type on every other platform, including Android: CryptDrive
 signs in through rclone's loopback redirect (`http://127.0.0.1:53682/`), which
 Google only accepts for desktop clients. The client secret of a desktop client
 is not confidential by Google's own definition; it is still stored only in the

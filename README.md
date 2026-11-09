@@ -12,12 +12,14 @@ on every platform, and without a sync client, FUSE mount or local mirror.
   [docs/google-oauth-client.md](docs/google-oauth-client.md).
 - **No crypto, OAuth or Drive code of its own**: a thin Go wrapper links
   [rclone v1.76.0](https://github.com/rclone/rclone/releases/tag/v1.76.0) as a
-  library, called from Flutter through Dart FFI.
+  library, called from Flutter through Dart FFI; in browsers, the same Go
+  code compiled to WebAssembly encrypts in the tab, zero-knowledge for the host.
 
 | Platform | Tier | Status |
 |----------|------|--------|
 | Linux | 1 — built and tested | AppImage |
-| Android | 1 — built and tested (emulator) | APK per ABI |
+| Android | 1 — built and tested (emulator) | APK (all processors) |
+| Web | 1 — built and tested (headless Chrome) | static site and container image, see [docs/web.md](docs/web.md) |
 | Windows | 2 — CI-built | setup .exe and portable zip (experimental) |
 | macOS | 3 — CI-built, untested | dmg (experimental) |
 | iOS | 3 — CI-built, untested | unsigned build (experimental) |
@@ -27,7 +29,8 @@ on every platform, and without a sync client, FUSE mount or local mirror.
 ```
 app/                         Flutter app (Riverpod)
 app/packages/cryptdrive_native  Dart FFI plugin bundling the native library
-native/                      Go wrapper over rclone (c-shared / c-archive)
+native/                      Go wrapper over rclone (c-shared / c-archive / WebAssembly)
+deploy/web/                  container image serving the web app
 tools/                       build, packaging and test harness scripts
 docs/                        user and developer docs
 ```

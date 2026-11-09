@@ -48,7 +48,20 @@ cd app && flutter run -d <device>   # or install the APK from CI
 - [ ] Refresh: the photo is listed with its real name; tap it to open it.
 - [ ] drive.google.com still shows only encrypted names and sizes.
 
-## 5. rclone CLI compatibility
+## 5. Web app
+
+Run the image (`docker run -p 8080:8080 ghcr.io/its-alex/cryptdrive-web:latest`)
+behind HTTPS, or on `http://localhost:8080` for a local check, and create a
+**Web application** OAuth client for that origin ([web.md](web.md#google-oauth-client-for-the-web)).
+
+- [ ] Choose a browser password, then **Sign in with Google** in the popup.
+- [ ] **Existing vault**, folder `CryptDrive`, same password: the photo from
+      the phone is listed; **Open** shows it.
+- [ ] Upload a file **larger than 8 MB** (rclone switches to Drive's
+      resumable upload above that size, which needs the browser to read the
+      `Location` header): it appears on the laptop.
+
+## 6. rclone CLI compatibility
 
 - [ ] **Settings → Export rclone.conf**, save it as `exported.conf`.
 - [ ] `rclone --config exported.conf ls vault:` lists the photo, and
