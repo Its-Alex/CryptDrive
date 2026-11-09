@@ -62,18 +62,21 @@ Future<AppEnvironment> bootstrap({
   AppDirectories? directories,
   String? libraryPath,
 }) async {
+  final clock = StartupClock();
   final dirs = directories ?? await AppDirectories.platformDefault();
   final configFile = File(p.join(dirs.support.path, 'rclone', 'rclone.conf'));
   final vault = VaultService(
     await Rclone.start(configPath: configFile.path, libraryPath: libraryPath),
     openedFilesDir: Directory(p.join(dirs.temporary.path, 'cryptdrive-opened')),
   );
+  clock.mark('native library started');
   // A previous run may have been killed before it could wipe its decrypted copies.
   await vault.wipeOpenedFiles();
 
   String? password;
   try {
     password = await secrets.readConfigPassword();
+    clock.mark('config password read from the system keystore');
     // iOS keeps Keychain items across reinstalls: a stored password with no config is reused, not an error.
     if (password == null) {
       if (await configFile.exists()) {
@@ -81,6 +84,7 @@ Future<AppEnvironment> bootstrap({
       }
       password = generateConfigPassword();
       await secrets.writeConfigPassword(password);
+      clock.mark('new config password stored in the system keystore');
     }
   } on PlatformException catch (error) {
     throw BootstrapException(BootstrapIssue.keystoreUnavailable, error.message ?? error.code);
@@ -91,6 +95,7 @@ Future<AppEnvironment> bootstrap({
   } on RcloneException catch (error) {
     throw BootstrapException(BootstrapIssue.configLocked, error.message);
   }
+  clock.mark('config decrypted');
   return AppEnvironment(
     rclone: vault.rclone,
     vault: vault,
@@ -109,5 +114,17 @@ Future<void> resetLockedConfig({required SecretStore secrets, AppDirectories? di
     await secrets.deleteConfigPassword();
   } on PlatformException {
     // Keystore unavailable: nothing stored to forget.
+  }
+}
+
+/// Prints how long each startup phase took, to tell a slow keystore from a slow disk.
+class StartupClock {
+  final _watch = Stopwatch()..start();
+  var _last = Duration.zero;
+
+  void mark(String phase) {
+    final now = _watch.elapsed;
+    stderr.writeln('cryptdrive startup: $phase in ${(now - _last).inMilliseconds} ms');
+    _last = now;
   }
 }
