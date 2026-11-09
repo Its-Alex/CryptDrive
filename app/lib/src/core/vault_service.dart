@@ -363,6 +363,17 @@ class VaultService {
     return File(p.join(targetDir.path, entry.name));
   }
 
+  /// Decrypts [entry] into [directory] under its own name (native).
+  Future<File> decryptInto(VaultEntry entry, Directory directory, {void Function(JobProgress)? onProgress}) async {
+    await rclone.runJob('operations/copyfile', {
+      'srcFs': await _vault(),
+      'srcRemote': entry.path,
+      'dstFs': directory.path,
+      'dstRemote': entry.name,
+    }, onProgress: onProgress);
+    return File(p.join(directory.path, entry.name));
+  }
+
   /// The first bytes of [entry] (at most [previewMaxBytes]), decrypted in memory.
   Future<Uint8List> readHead(VaultEntry entry, {int maxBytes = previewMaxBytes}) async {
     final count = min(maxBytes, previewMaxBytes);

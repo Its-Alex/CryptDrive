@@ -256,6 +256,80 @@ class FileActions {
     }
   }
 
+  /// Moves every entry into [folder]; returns the paths that moved.
+  Future<Set<String>> moveMany(List<VaultEntry> entries, String folder) async {
+    final moved = <String>{};
+    final sources = <String>{};
+    for (final entry in entries) {
+      if (parentVaultPath(entry.path) == folder) continue;
+      if (await _attempt(() => _vault.move(entry, joinVaultPath(folder, entry.name)))) {
+        moved.add(entry.path);
+        sources.add(parentVaultPath(entry.path));
+        await ref.read(recentFilesProvider.notifier).forget(entry.path);
+      }
+    }
+    sources.forEach(_refresh);
+    _refresh(folder);
+    return moved;
+  }
+
+  /// Deletes every entry; returns the paths that were deleted.
+  Future<Set<String>> deleteMany(List<VaultEntry> entries) async {
+    final deleted = <String>{};
+    await Future.wait(
+      entries.map((entry) async {
+        if (await _attempt(() => _vault.delete(entry))) {
+          deleted.add(entry.path);
+          await ref.read(recentFilesProvider.notifier).forget(entry.path);
+        }
+      }),
+    );
+    entries.map((entry) => parentVaultPath(entry.path)).toSet().forEach(_refresh);
+    return deleted;
+  }
+
+  /// Decrypts files into a folder the user picks (desktop) or as browser downloads (web).
+  Future<void> saveCopies(List<VaultEntry> files) async {
+    if (kIsWeb) {
+      for (final file in files) {
+        await _deliverInBrowser(file, openInNewTab: false);
+      }
+      return;
+    }
+    final target = await FilePicker.getDirectoryPath(dialogTitle: 'Save decrypted copies to');
+    if (target == null) return;
+    var saved = 0;
+    await Future.wait(
+      files.map((file) async {
+        _transfers.start(TransferKind.decrypt, file.path);
+        try {
+          await _vault.decryptInto(
+            file,
+            Directory(target),
+            onProgress: (progress) => _transfers.progress(file.path, progress.fraction),
+          );
+          saved++;
+        } catch (error) {
+          if (context.mounted) showMessage(context, '${file.name}: ${describeError(error)}');
+        } finally {
+          _transfers.finish(file.path);
+        }
+      }),
+    );
+    if (context.mounted) showMessage(context, 'Saved $saved decrypted ${saved == 1 ? 'copy' : 'copies'} to $target');
+  }
+
+  /// Decrypts the files and opens the share sheet with all of them.
+  Future<void> shareMany(List<VaultEntry> files) async {
+    final decrypted = <File>[];
+    for (final file in files) {
+      final copy = await _decrypt(file);
+      if (copy != null) decrypted.add(copy);
+    }
+    if (decrypted.isEmpty) return;
+    await SharePlus.instance.share(ShareParams(files: [for (final file in decrypted) XFile(file.path)]));
+  }
+
   Future<bool> delete(VaultEntry entry) async {
     final deleted = await _attempt(() => _vault.delete(entry));
     if (deleted) await ref.read(recentFilesProvider.notifier).forget(entry.path);
