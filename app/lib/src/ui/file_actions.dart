@@ -376,9 +376,12 @@ Future<void> showPreview(BuildContext context, VaultEntry entry, Uint8List bytes
 }
 
 /// Types a browser shows itself; anything else is downloaded.
+///
+/// A blob URL runs in the app's origin: never open a type that can run scripts
+/// (SVG, HTML…), or a file in the vault could read the stored config and password.
 bool opensInBrowserTab(VaultEntry entry) {
   final mime = entry.mimeType ?? '';
-  return mime.startsWith('image/') ||
+  return (mime.startsWith('image/') && !mime.contains('svg')) ||
       mime.startsWith('video/') ||
       mime.startsWith('audio/') ||
       mime == 'application/pdf' ||

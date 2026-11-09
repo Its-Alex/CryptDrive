@@ -2,6 +2,7 @@ import 'package:cryptdrive/src/core/vault_service.dart';
 import 'package:cryptdrive/src/state/recent_files.dart';
 import 'package:cryptdrive/src/state/transfers.dart';
 import 'package:cryptdrive/src/ui/entry_widgets.dart';
+import 'package:cryptdrive/src/ui/file_actions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -42,5 +43,15 @@ void main() {
     expect(formatBytes(1536), '1.5 KB');
     expect(formatBytes(3 * 1024 * 1024 + 1), '3.0 MB');
     expect(formatBytes(800 * 1024), '800 KB');
+  });
+
+  test('only script-free types open in a browser tab', () {
+    VaultEntry file(String mime) =>
+        VaultEntry(path: 'f', name: 'f', isDir: false, size: 1, modTime: null, mimeType: mime);
+    expect(opensInBrowserTab(file('image/jpeg')), isTrue);
+    expect(opensInBrowserTab(file('application/pdf')), isTrue);
+    expect(opensInBrowserTab(file('image/svg+xml')), isFalse);
+    expect(opensInBrowserTab(file('text/html')), isFalse);
+    expect(opensInBrowserTab(file('application/xhtml+xml')), isFalse);
   });
 }
