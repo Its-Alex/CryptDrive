@@ -15,7 +15,6 @@ import (
 	"github.com/rclone/rclone/fs/rc"
 	"github.com/rclone/rclone/librclone/librclone"
 
-	_ "github.com/rclone/rclone/backend/all"
 	_ "github.com/rclone/rclone/fs/operations"
 	_ "github.com/rclone/rclone/fs/sync"
 )
@@ -28,6 +27,17 @@ var initializeOnce sync.Once
 // installing file storage when the path is empty, and would otherwise read
 // the user's own ~/.config/rclone/rclone.conf.
 func Initialize(configPath string) error {
+	return initialize(configPath, nil)
+}
+
+// InitializeWithStorage starts the library with its config kept in storage
+// instead of a file (the browser has no file system).
+func InitializeWithStorage(storage config.Storage) error {
+	// Only a non-empty path makes rclone use a config storage at all; nothing is read from it.
+	return initialize("/cryptdrive/rclone.conf", storage)
+}
+
+func initialize(configPath string, storage config.Storage) error {
 	var initializeErr error
 	initializeOnce.Do(func() {
 		if err := config.SetConfigPath(configPath); err != nil {
@@ -39,6 +49,9 @@ func Initialize(configPath string) error {
 		globalConfig.AskPassword = false
 		globalConfig.LogLevel = fs.LogLevelNotice
 		librclone.Initialize()
+		if storage != nil {
+			config.SetData(storage)
+		}
 	})
 	return initializeErr
 }

@@ -12,6 +12,7 @@ cmake = "4.4.5"
 ninja = "1.13.2"
 "conda:clang" = { version = "23.1.4", os = ["linux"] }
 rclone = "1.76.0"
+node = "24.22.2"
 
 [env]
 _.path = ["{{config_root}}/tools/bin"]
@@ -46,3 +47,12 @@ description = "Dart/Flutter tests (needs native:linux)"
 depends = ["native:linux"]
 dir = "app"
 run = ["flutter test", "cd packages/cryptdrive_native && flutter test"]
+
+[tasks."native:web"]
+description = "Build the browser engine (cryptdrive.wasm) into app/web/cryptdrive"
+run = "native/build.sh web"
+
+[tasks."test:web-engine"]
+description = "Round-trip through cryptdrive.wasm under Node (needs native:web)"
+depends = ["native:web"]
+run = "node native/wasm/smoke_test.mjs app/web/cryptdrive"

@@ -16,6 +16,8 @@ import (
 	"unsafe"
 
 	"github.com/Its-Alex/CryptDrive/native/bridge"
+
+	_ "github.com/rclone/rclone/backend/all"
 )
 
 // CryptDriveInitialize returns NULL on success, else an error message the caller frees with RcloneFreeString.

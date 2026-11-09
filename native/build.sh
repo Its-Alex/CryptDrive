@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds libcryptdrive for one target and drops it where the cryptdrive_native plugin bundles it.
-# Usage: native/build.sh linux-x64|linux-arm64|windows-x64|android [abi...]|macos|ios
+# Usage: native/build.sh linux-x64|linux-arm64|windows-x64|android [abi...]|macos|ios|web
 set -euo pipefail
 
 native_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -92,6 +92,11 @@ macos)
 ios)
 	# Device only: a single static library cannot hold both device and simulator arm64 slices.
 	build_apple ios arm64 iphoneos -miphoneos-version-min=15.0 c-archive "$plugin_dir/ios/Libraries/libcryptdrive.a"
+	;;
+web)
+	web_dir="$native_dir/../app/web/cryptdrive"
+	(cd "$native_dir" && GOOS=js GOARCH=wasm go build "${go_flags[@]}" -o "$web_dir/cryptdrive.wasm" ./wasm)
+	cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" "$web_dir/wasm_exec.js"
 	;;
 *)
 	echo "unknown target: $target" >&2

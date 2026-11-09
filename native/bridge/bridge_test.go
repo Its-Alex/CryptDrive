@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	_ "github.com/rclone/rclone/backend/all"
 )
 
 func call(t *testing.T, method string, params map[string]any) map[string]any {
@@ -277,5 +280,67 @@ func TestStopRunningJobsCancelsAsyncJobs(t *testing.T) {
 	job := call(t, "job/status", map[string]any{"jobid": started["jobid"]})
 	if job["finished"] != true || job["success"] == true {
 		t.Fatalf("async job was not stopped: %v", job)
+	}
+}
+
+func TestEncryptedMemoryStorageRoundTrip(t *testing.T) {
+	var saved string
+	storage := NewEncryptedMemoryStorage(func(encrypted string) { saved = encrypted })
+	if err := storage.Unlock("browser password", ""); err != nil {
+		t.Fatal(err)
+	}
+	storage.SetValue("vault", "type", "crypt")
+	if err := storage.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(saved, encryptedConfigMarker) || strings.Contains(saved, "[vault]") {
+		t.Fatalf("saved config is not encrypted:\n%s", saved)
+	}
+
+	reopened := NewEncryptedMemoryStorage(nil)
+	if err := reopened.Unlock("wrong password", saved); err != ErrWrongConfigPassword {
+		t.Fatalf("expected a wrong password error, got %v", err)
+	}
+	if err := reopened.Unlock("browser password", saved); err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := reopened.GetValue("vault", "type"); !ok || value != "crypt" {
+		t.Fatalf("unexpected value after unlock: %q %v", value, ok)
+	}
+	if err := SetConfigPassword("config password"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPutAndReadFileThroughCrypt(t *testing.T) {
+	if err := SetConfigPassword("config password"); err != nil {
+		t.Fatal(err)
+	}
+	storageDir := t.TempDir()
+	call(t, "config/create", map[string]any{
+		"name": "bytesvault", "type": "crypt",
+		"parameters": map[string]any{"remote": storageDir, "password": "vault password"},
+		"opt":        map[string]any{"nonInteractive": true, "obscure": true},
+	})
+	content := bytes.Repeat([]byte("0123456789"), 100000)
+	ctx := context.Background()
+	if err := PutFile(ctx, "bytesvault:", "Docs/big.bin", content, "test-put"); err != nil {
+		t.Fatal(err)
+	}
+	stats := call(t, "core/stats", map[string]any{"group": "test-put"})
+	if stats["bytes"].(float64) < float64(len(content)) {
+		t.Fatalf("unexpected stats: %v", stats)
+	}
+	whole, err := ReadFile(ctx, "bytesvault:", "Docs/big.bin", 0, -1)
+	if err != nil || !bytes.Equal(whole, content) {
+		t.Fatalf("whole read failed: %v", err)
+	}
+	chunk, err := ReadFile(ctx, "bytesvault:", "Docs/big.bin", 999990, 20)
+	if err != nil || string(chunk) != "0123456789" {
+		t.Fatalf("ranged read returned %q, %v", chunk, err)
+	}
+	past, err := ReadFile(ctx, "bytesvault:", "Docs/big.bin", int64(len(content)), 10)
+	if err != nil || len(past) != 0 {
+		t.Fatalf("read past the end returned %d bytes, %v", len(past), err)
 	}
 }
