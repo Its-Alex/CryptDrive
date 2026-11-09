@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
 import '../core/vault_service.dart';
+import '../platform/browser_api.dart' as browser;
 import '../state/providers.dart';
 import '../state/recent_files.dart';
 import '../state/transfers.dart';
@@ -18,7 +19,14 @@ import 'widgets.dart';
 
 enum EntryAction { open, preview, share, saveCopy, rename, move, delete }
 
-bool get canShareFiles => Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isWindows;
+bool get canShareFiles =>
+    !kIsWeb &&
+    const {
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }.contains(defaultTargetPlatform);
 
 bool canPreview(VaultEntry entry) {
   final mime = entry.mimeType ?? '';
@@ -92,6 +100,24 @@ class FileActions {
     }
   }
 
+  /// Browser: decrypts [entry] in memory and hands it to the browser.
+  Future<bool> _deliverInBrowser(VaultEntry entry, {required bool openInNewTab}) async {
+    _transfers.start(TransferKind.decrypt, entry.path);
+    try {
+      final parts = await _vault.downloadBytes(
+        entry,
+        onProgress: (progress) => _transfers.progress(entry.path, progress.fraction),
+      );
+      browser.deliverFile(entry.name, parts, mimeType: entry.mimeType, openInNewTab: openInNewTab);
+      return true;
+    } catch (error) {
+      if (context.mounted) showMessage(context, describeError(error));
+      return false;
+    } finally {
+      _transfers.finish(entry.path);
+    }
+  }
+
   Future<bool> _attempt(Future<void> Function() action) async {
     try {
       await action();
@@ -127,10 +153,47 @@ class FileActions {
     );
   }
 
+  /// Browser: encrypts and uploads files picked in the browser, kept in memory meanwhile.
+  Future<void> uploadPicked(List<({String name, Uint8List bytes})> files, String directory) async {
+    await Future.wait(
+      files.map((file) async {
+        final path = joinVaultPath(directory, file.name);
+        _transfers.start(TransferKind.upload, path);
+        try {
+          await _vault.uploadBytes(
+            file.bytes,
+            directory,
+            file.name,
+            onProgress: (progress) => _transfers.progress(path, progress.fraction),
+          );
+          await ref
+              .read(recentFilesProvider.notifier)
+              .record(
+                VaultEntry(path: path, name: file.name, isDir: false, size: file.bytes.length, modTime: DateTime.now()),
+                RecentAction.uploaded,
+              );
+        } catch (error) {
+          if (context.mounted) showMessage(context, 'Upload of ${file.name} failed: ${describeError(error)}');
+        } finally {
+          _transfers.finish(path);
+          _refresh(directory);
+        }
+      }),
+    );
+  }
+
   /// Returns true when the entry left its folder (moved or deleted).
   Future<bool> run(VaultEntry entry, EntryAction action) async {
     final parent = parentVaultPath(entry.path);
     switch (action) {
+      case EntryAction.open when kIsWeb:
+        if (await _deliverInBrowser(entry, openInNewTab: opensInBrowserTab(entry))) {
+          await ref.read(recentFilesProvider.notifier).record(entry, RecentAction.opened);
+        }
+        return false;
+      case EntryAction.saveCopy when kIsWeb:
+        await _deliverInBrowser(entry, openInNewTab: false);
+        return false;
       case EntryAction.open:
         final file = await _decrypt(entry);
         if (file == null) return false;
@@ -236,4 +299,14 @@ Future<void> showPreview(BuildContext context, VaultEntry entry, Uint8List bytes
       actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
     ),
   );
+}
+
+/// Types a browser shows itself; anything else is downloaded.
+bool opensInBrowserTab(VaultEntry entry) {
+  final mime = entry.mimeType ?? '';
+  return mime.startsWith('image/') ||
+      mime.startsWith('video/') ||
+      mime.startsWith('audio/') ||
+      mime == 'application/pdf' ||
+      mime == 'text/plain';
 }

@@ -72,14 +72,14 @@ void main() {
     }
 
     final decrypted = await vault.decryptToTemp(photos.single);
-    expect(decrypted.path, startsWith(vault.openedFilesDir.path));
+    expect(decrypted.path, startsWith(vault.openedFilesDir!.path));
     expect(await decrypted.readAsBytes(), photoBytes);
 
     final head = await vault.readHead(photos.single, maxBytes: 1024);
     expect(head, photoBytes.sublist(0, 1024));
 
     await vault.wipeOpenedFiles();
-    expect(vault.openedFilesDir.existsSync(), isFalse);
+    expect(vault.openedFilesDir!.existsSync(), isFalse);
   });
 
   test('rename, move and delete files and folders', () async {

@@ -10,6 +10,8 @@ import 'package:integration_test/integration_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'helpers.dart';
+
 /// MVP acceptance flow on a real device/desktop, with a local folder standing in
 /// for Google Drive: set up, create a vault, upload, browse, CRUD, preview, export.
 void main() {
@@ -33,7 +35,7 @@ void main() {
 
     // Real keystore: the config password went to flutter_secure_storage, the config is encrypted on disk.
     final environment = container.read(environmentProvider).requireValue;
-    expect(await environment.secrets.readConfigPassword(), isNotEmpty);
+    expect(await environment.secrets!.readConfigPassword(), isNotEmpty);
 
     await tester.tap(find.byKey(const Key('chooseLocalFolder')));
     await tester.pumpAndSettle();
@@ -46,7 +48,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('vaultPasswordConfirmationField')), 'correct horse battery staple');
     await tapVisible(tester, find.byKey(const Key('vaultSubmit')));
     await pumpUntilFound(tester, find.text('This folder is empty.'));
-    expect(environment.configFile.readAsStringSync(), contains('RCLONE_ENCRYPT_V0:'));
+    expect(environment.configFile!.readAsStringSync(), contains('RCLONE_ENCRYPT_V0:'));
 
     // Upload, as the file picker / share target does once the file is staged locally.
     final staged = File(p.join(runDir.path, 'staging', 'notes.txt'));
@@ -111,50 +113,7 @@ void main() {
 
     await environment.shutdown();
     expect(Directory(p.join(directories.temporary.path, 'cryptdrive-opened')).existsSync(), isFalse);
-    await environment.secrets.deleteConfigPassword();
+    await environment.secrets!.deleteConfigPassword();
     await runDir.delete(recursive: true);
   });
-}
-
-/// Closes the on-screen keyboard first: on phones it shrinks the viewport over the target.
-Future<void> tapVisible(WidgetTester tester, Finder finder) async {
-  FocusManager.instance.primaryFocus?.unfocus();
-  await tester.pumpAndSettle();
-  await tester.ensureVisible(finder);
-  await tester.pumpAndSettle();
-  await tester.tap(finder);
-}
-
-Future<void> chooseMenuAction(WidgetTester tester, String entryPath, String action) async {
-  FocusManager.instance.primaryFocus?.unfocus();
-  await tester.pumpAndSettle();
-  await tester.tap(find.byKey(Key('menu:$entryPath')));
-  await pumpUntilFound(tester, find.text(action));
-  await tester.pumpAndSettle();
-  await tester.ensureVisible(find.text(action).last);
-  await tester.pumpAndSettle();
-  await tester.tap(find.text(action).last);
-  await tester.pumpAndSettle();
-}
-
-Future<void> pumpUntilFound(
-  WidgetTester tester,
-  Finder finder, {
-  Duration timeout = const Duration(seconds: 30),
-}) async {
-  final deadline = DateTime.now().add(timeout);
-  while (DateTime.now().isBefore(deadline)) {
-    await tester.pump(const Duration(milliseconds: 100));
-    if (finder.evaluate().isNotEmpty) return;
-  }
-  throw TestFailure('Timed out waiting for $finder');
-}
-
-Future<void> pumpUntilGone(WidgetTester tester, Finder finder, {Duration timeout = const Duration(seconds: 30)}) async {
-  final deadline = DateTime.now().add(timeout);
-  while (DateTime.now().isBefore(deadline)) {
-    await tester.pump(const Duration(milliseconds: 100));
-    if (finder.evaluate().isEmpty) return;
-  }
-  throw TestFailure('Timed out waiting for $finder to disappear');
 }

@@ -1,9 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
 
+import '../core/app_store.dart';
+import '../core/bootstrap.dart';
 import '../core/vault_service.dart';
 import 'providers.dart';
 
@@ -43,15 +43,16 @@ class RecentFile {
 /// Files recently opened or uploaded on this device, newest first.
 class RecentFiles extends AsyncNotifier<List<RecentFile>> {
   static const _limit = 50;
-  late File _store;
+  late AppStore _store;
 
   @override
   Future<List<RecentFile>> build() async {
     final environment = await ref.watch(environmentProvider.future);
-    _store = File(p.join(environment.supportDir.path, 'recent-files.json'));
-    if (!await _store.exists()) return [];
+    _store = environment.store;
+    final saved = await _store.read(recentFilesKey);
+    if (saved == null) return [];
     try {
-      final decoded = jsonDecode(await _store.readAsString()) as List;
+      final decoded = jsonDecode(saved) as List;
       return decoded.map((item) => RecentFile.fromJson(item as Map<String, dynamic>)).toList();
     } on FormatException {
       return [];
@@ -80,8 +81,7 @@ class RecentFiles extends AsyncNotifier<List<RecentFile>> {
   }
 
   Future<void> _save(List<RecentFile> items) async {
-    await _store.parent.create(recursive: true);
-    await _store.writeAsString(jsonEncode(items.map((item) => item.toJson()).toList()));
+    await _store.write(recentFilesKey, jsonEncode(items.map((item) => item.toJson()).toList()));
   }
 }
 

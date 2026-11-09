@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:path/path.dart' as p;
 
-import 'app_flow_test.dart' show chooseMenuAction, pumpUntilFound;
+import 'helpers.dart';
 import 'cross_device_phone_test.dart' show photoBytes;
 
 /// Laptop half of the cross-device check: imports the phone's exported
@@ -52,7 +52,7 @@ void main() {
     expect(await (await environment.vault.decryptToTemp(photo)).readAsBytes(), photoBytes);
 
     await environment.shutdown();
-    await environment.secrets.deleteConfigPassword();
+    await environment.secrets!.deleteConfigPassword();
     await runDir.delete(recursive: true);
   });
 }

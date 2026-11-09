@@ -46,3 +46,7 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Built by native/build.sh web
+/web/cryptdrive/cryptdrive.wasm
+/web/cryptdrive/wasm_exec.js

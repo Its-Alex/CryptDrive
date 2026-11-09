@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -54,6 +55,7 @@ class OnboardingScreen extends ConsumerWidget {
                       : Text(switch (status.storageKind) {
                           StorageKind.googleDrive => 'Google Drive connected (client ${status.clientId ?? ''}).',
                           StorageKind.localFolder => 'Using a local folder instead of Google Drive.',
+                          StorageKind.browserMemory => 'Using this tab\'s memory instead of Google Drive.',
                           _ => 'Storage "${status.storageRemote}" configured.',
                         }),
                 ),
@@ -66,7 +68,7 @@ class OnboardingScreen extends ConsumerWidget {
                       ? _VaultStep(
                           vault: environment.vault,
                           status: status,
-                          localFolderBase: p.join(environment.supportDir.path, 'local-storage'),
+                          localFolderBase: p.join(environment.supportDir?.path ?? '', 'local-storage'),
                           onDone: () => ref.invalidate(setupStatusProvider),
                         )
                       : Text('Connect your storage first.', style: TextStyle(color: scheme.onSurfaceVariant)),
@@ -165,12 +167,16 @@ class _StorageStepState extends State<_StorageStep> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SegmentedButton<_StorageChoice>(
-          segments: const [
-            ButtonSegment(value: _StorageChoice.googleDrive, icon: Icon(Icons.cloud), label: Text('Google Drive')),
+          segments: [
+            const ButtonSegment(
+              value: _StorageChoice.googleDrive,
+              icon: Icon(Icons.cloud),
+              label: Text('Google Drive'),
+            ),
             ButtonSegment(
               value: _StorageChoice.localFolder,
-              icon: Icon(Icons.folder),
-              label: Text('Local folder', key: Key('chooseLocalFolder')),
+              icon: Icon(kIsWeb ? Icons.tab : Icons.folder),
+              label: Text(kIsWeb ? 'This tab only' : 'Local folder', key: const Key('chooseLocalFolder')),
             ),
           ],
           selected: {_choice},
@@ -187,21 +193,24 @@ class _StorageStepState extends State<_StorageStep> {
           )
         else ...[
           const Text(
-            'Stores the encrypted vault in a folder on this device instead of Google Drive. '
-            'Meant for trying CryptDrive out and for testing without a Google account.',
+            kIsWeb
+                ? 'Keeps the encrypted vault in this tab\'s memory instead of Google Drive: everything is gone '
+                      'when you reload, and empty folders are not kept. Meant for trying CryptDrive out without a Google account.'
+                : 'Stores the encrypted vault in a folder on this device instead of Google Drive. '
+                      'Meant for trying CryptDrive out and for testing without a Google account.',
           ),
           const SizedBox(height: 12),
           FilledButton(
             key: const Key('useLocalFolder'),
             onPressed: () async {
               try {
-                await widget.vault.connectLocalFolder();
+                await (kIsWeb ? widget.vault.connectBrowserMemory() : widget.vault.connectLocalFolder());
                 widget.onDone();
               } catch (error) {
                 if (context.mounted) showMessage(context, describeError(error));
               }
             },
-            child: const Text('Use a local folder'),
+            child: Text(kIsWeb ? 'Try it in this tab' : 'Use a local folder'),
           ),
         ],
       ],
@@ -289,7 +298,11 @@ class _VaultStepState extends State<_VaultStep> {
           key: const Key('vaultFolderField'),
           controller: _folder,
           decoration: InputDecoration(
-            labelText: widget.status.storageKind == StorageKind.localFolder ? 'Folder path' : 'Folder in Google Drive',
+            labelText: switch (widget.status.storageKind) {
+              StorageKind.localFolder => 'Folder path',
+              StorageKind.googleDrive => 'Folder in Google Drive',
+              _ => 'Folder',
+            },
           ),
         ),
         const SizedBox(height: 12),

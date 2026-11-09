@@ -11,7 +11,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-import 'app_flow_test.dart' show pumpUntilFound, tapVisible;
+import 'helpers.dart';
 
 /// Phone half of the cross-device check (tools/cross-device-check.sh): creates a
 /// vault in a local folder standing in for Drive, uploads a photo, exports rclone.conf.
@@ -57,7 +57,7 @@ void main() {
     await File(p.join(crossDevice.path, 'exported-rclone.conf'))
         .writeAsString(await environment.vault.exportRcloneConf());
     await environment.shutdown();
-    await environment.secrets.deleteConfigPassword();
+    await environment.secrets!.deleteConfigPassword();
   });
 }
 

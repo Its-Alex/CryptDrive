@@ -1,10 +1,13 @@
 import 'dart:io';
 
 import 'package:cryptdrive_native/cryptdrive_native.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../platform/browser_api.dart' as browser;
+import 'app_store.dart';
 import 'secret_store.dart';
 import 'vault_service.dart';
 
@@ -30,22 +33,73 @@ class AppEnvironment {
   AppEnvironment({
     required this.rclone,
     required this.vault,
-    required this.secrets,
-    required this.configFile,
-    required this.supportDir,
+    required this.store,
+    this.secrets,
+    this.configFile,
+    this.supportDir,
+    this.browser,
   });
 
   final Rclone rclone;
   final VaultService vault;
-  final SecretStore secrets;
-  final File configFile;
-  final Directory supportDir;
+  final AppStore store;
+
+  /// Native only: the keystore holding the config password, and the encrypted config file.
+  final SecretStore? secrets;
+  final File? configFile;
+  final Directory? supportDir;
+
+  /// Browser only: the config is unlocked with a password typed in each session.
+  final BrowserSession? browser;
 
   Future<void> shutdown() async {
     await vault.wipeOpenedFiles();
     await rclone.shutdown();
   }
 }
+
+/// The browser keeps only the encrypted rclone.conf (localStorage); its
+/// password never leaves the tab, except in sessionStorage to survive reloads.
+class BrowserSession {
+  BrowserSession(this._rclone, this._store);
+
+  static const configKey = 'rclone.conf';
+
+  final Rclone _rclone;
+  final AppStore _store;
+
+  Future<bool> hasSavedConfig() async => (await _store.read(configKey))?.isNotEmpty ?? false;
+
+  /// Throws [RcloneException] on a wrong password.
+  Future<void> unlock(String password) async {
+    await _rclone.unlock(password, await _store.read(configKey) ?? '');
+    browser.writeSessionPassword(password);
+  }
+
+  /// Unlocks with the password remembered by this tab, if any.
+  Future<bool> resume() async {
+    final password = browser.readSessionPassword();
+    if (password == null) return false;
+    try {
+      await unlock(password);
+      return true;
+    } on RcloneException {
+      browser.writeSessionPassword(null);
+      return false;
+    }
+  }
+
+  void lock() => browser.writeSessionPassword(null);
+
+  /// Deletes everything CryptDrive keeps in this browser; the vault itself is untouched.
+  Future<void> forget() async {
+    lock();
+    await _store.delete(configKey);
+    await _store.delete(recentFilesKey);
+  }
+}
+
+const recentFilesKey = 'recent-files.json';
 
 class AppDirectories {
   const AppDirectories({required this.support, required this.temporary});
@@ -55,6 +109,21 @@ class AppDirectories {
 
   static Future<AppDirectories> platformDefault() async =>
       AppDirectories(support: await getApplicationSupportDirectory(), temporary: await getTemporaryDirectory());
+}
+
+Future<AppEnvironment> bootstrapBrowser({AppStore? store}) async {
+  final clock = StartupClock();
+  final appStore = store ?? browser.browserAppStore();
+  final rclone = await Rclone.startInBrowser(
+    onConfigSaved: (encryptedConf) => appStore.write(BrowserSession.configKey, encryptedConf),
+  );
+  clock.mark('browser engine started');
+  return AppEnvironment(
+    rclone: rclone,
+    vault: VaultService(rclone),
+    store: appStore,
+    browser: BrowserSession(rclone, appStore),
+  );
 }
 
 Future<AppEnvironment> bootstrap({
@@ -99,6 +168,7 @@ Future<AppEnvironment> bootstrap({
   return AppEnvironment(
     rclone: vault.rclone,
     vault: vault,
+    store: FileAppStore(dirs.support),
     secrets: secrets,
     configFile: configFile,
     supportDir: dirs.support,
@@ -124,7 +194,7 @@ class StartupClock {
 
   void mark(String phase) {
     final now = _watch.elapsed;
-    stderr.writeln('cryptdrive startup: $phase in ${(now - _last).inMilliseconds} ms');
+    debugPrint('cryptdrive startup: $phase in ${(now - _last).inMilliseconds} ms');
     _last = now;
   }
 }

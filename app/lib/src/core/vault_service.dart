@@ -10,10 +10,11 @@ import 'package:path/path.dart' as p;
 abstract final class RemoteNames {
   static const googleDrive = 'gdrive';
   static const localFolder = 'localstore';
+  static const browserMemory = 'memorystore';
   static const vault = 'vault';
 }
 
-enum StorageKind { googleDrive, localFolder, other }
+enum StorageKind { googleDrive, localFolder, browserMemory, other }
 
 class SetupStatus {
   const SetupStatus({this.storageRemote, this.storageKind, this.vaultRemote, this.clientId});
@@ -66,12 +67,12 @@ class InvalidTokenException implements Exception {
 
 /// Everything CryptDrive does with the vault, expressed as rclone rc calls.
 class VaultService {
-  VaultService(this.rclone, {required this.openedFilesDir});
+  VaultService(this.rclone, {this.openedFilesDir});
 
   final Rclone rclone;
 
   /// Holds decrypted copies handed to other apps; wiped on start and exit.
-  final Directory openedFilesDir;
+  final Directory? openedFilesDir;
 
   /// Max bytes a single `operations/getfile` call may return.
   static const previewMaxBytes = 2 * 1024 * 1024;
@@ -100,9 +101,11 @@ class VaultService {
       final wrappedRemote = colon > 0 ? wrapped.substring(0, colon) : null;
       if (wrappedRemote != null && remotes.containsKey(wrappedRemote)) storageRemote = wrappedRemote;
     }
-    storageRemote ??= remotes.containsKey(RemoteNames.googleDrive)
-        ? RemoteNames.googleDrive
-        : (remotes.containsKey(RemoteNames.localFolder) ? RemoteNames.localFolder : null);
+    storageRemote ??= [
+      RemoteNames.googleDrive,
+      RemoteNames.localFolder,
+      RemoteNames.browserMemory,
+    ].where(remotes.containsKey).firstOrNull;
 
     final storageType = storageRemote == null ? null : remotes[storageRemote]!['type'];
     return SetupStatus(
@@ -111,6 +114,7 @@ class VaultService {
         null => null,
         'drive' => StorageKind.googleDrive,
         'local' => StorageKind.localFolder,
+        'memory' => StorageKind.browserMemory,
         _ => StorageKind.other,
       },
       vaultRemote: vaultRemote,
@@ -212,6 +216,16 @@ class VaultService {
       'name': RemoteNames.googleDrive,
       'parameters': {'client_id': clientId, 'client_secret': clientSecret, 'token': normalizeToken(tokenJson)},
       'opt': {'nonInteractive': true, 'obscure': true},
+    });
+  }
+
+  /// Browser only: storage that lives in this tab's memory, lost on reload (testing, demos).
+  Future<void> connectBrowserMemory() async {
+    await rclone.call('config/create', {
+      'name': RemoteNames.browserMemory,
+      'type': 'memory',
+      'parameters': <String, dynamic>{},
+      'opt': {'nonInteractive': true},
     });
   }
 
@@ -338,7 +352,7 @@ class VaultService {
 
   /// Decrypts [entry] into [openedFilesDir] for an OS opener or share sheet.
   Future<File> decryptToTemp(VaultEntry entry, {void Function(JobProgress)? onProgress}) async {
-    final targetDir = Directory(p.join(openedFilesDir.path, _randomId()));
+    final targetDir = Directory(p.join(openedFilesDir!.path, _randomId()));
     await targetDir.create(recursive: true);
     await rclone.runJob('operations/copyfile', {
       'srcFs': await _vault(),
@@ -372,6 +386,36 @@ class VaultService {
     }, onProgress: onProgress);
   }
 
+  /// Browser: encrypts and uploads [data] as [name] into [directory].
+  Future<void> uploadBytes(
+    Uint8List data,
+    String directory,
+    String name, {
+    void Function(JobProgress)? onProgress,
+  }) async {
+    await rclone.putFile(await _vault(), joinVaultPath(directory, name), data, onProgress: onProgress);
+  }
+
+  /// Browser: downloads and decrypts [entry] in [chunkBytes] pieces, kept as separate parts.
+  Future<List<Uint8List>> downloadBytes(
+    VaultEntry entry, {
+    void Function(JobProgress)? onProgress,
+    int chunkBytes = 8 * 1024 * 1024,
+  }) async {
+    final vault = await _vault();
+    final parts = <Uint8List>[];
+    var offset = 0;
+    while (true) {
+      final part = await rclone.readFile(vault, entry.path, offset: offset, count: chunkBytes);
+      if (part.isEmpty) break;
+      parts.add(part);
+      offset += part.length;
+      onProgress?.call(JobProgress(bytes: offset, totalBytes: entry.size));
+      if (part.length < chunkBytes || (entry.size >= 0 && offset >= entry.size)) break;
+    }
+    return parts;
+  }
+
   Future<String> exportRcloneConf() async => (await rclone.call('cryptdrive/exportconfig'))['conf'] as String;
 
   Future<List<String>> importRcloneConf(String confText, {String? password}) async {
@@ -383,7 +427,8 @@ class VaultService {
   }
 
   Future<void> wipeOpenedFiles() async {
-    if (await openedFilesDir.exists()) await openedFilesDir.delete(recursive: true);
+    final directory = openedFilesDir;
+    if (directory != null && await directory.exists()) await directory.delete(recursive: true);
   }
 
   static String _randomId() {

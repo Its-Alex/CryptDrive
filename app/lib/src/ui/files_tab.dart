@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -37,7 +38,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   @override
   void initState() {
     super.initState();
-    if (Platform.isAndroid || Platform.isIOS) {
+    if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)) {
       _sharedFiles = ReceiveSharingIntent.instance.getMediaStream().listen(_onShared);
       ReceiveSharingIntent.instance.getInitialMedia().then((files) {
         _onShared(files);
@@ -96,6 +97,11 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   Future<void> _pickAndUpload() async {
     final picked = await FilePicker.pickFiles(dialogTitle: 'Upload to vault');
     if (picked.isEmpty || !mounted) return;
+    if (kIsWeb) {
+      final files = [for (final file in picked) (name: file.name, bytes: await file.xFile.readAsBytes())];
+      if (mounted) await _actions.uploadPicked(files, _directory);
+      return;
+    }
     final stagingDir = await Directory.systemTemp.createTemp('cryptdrive-upload');
     try {
       final staged = <File>[];

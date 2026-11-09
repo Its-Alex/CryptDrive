@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/vault_service.dart';
+import '../platform/browser_api.dart' as browser;
 import '../state/providers.dart';
 import 'config_transfer.dart';
 import 'google_auth_form.dart';
@@ -32,6 +33,7 @@ class SettingsScreen extends ConsumerWidget {
               title: Text(switch (status?.storageKind) {
                 StorageKind.googleDrive => 'Google Drive',
                 StorageKind.localFolder => 'Local folder',
+                StorageKind.browserMemory => 'This tab only (lost on reload)',
                 _ => status?.storageRemote ?? 'Not configured',
               }),
               subtitle: status?.clientId == null ? null : Text('OAuth client: ${status!.clientId}'),
@@ -73,6 +75,39 @@ class SettingsScreen extends ConsumerWidget {
               },
             ),
           ]),
+          if (environment.browser case final session?)
+            _Section('This browser', [
+              ListTile(
+                key: const Key('lockBrowser'),
+                leading: const Icon(Icons.lock_outline),
+                title: const Text('Lock'),
+                subtitle: const Text('Asks for the browser password again.'),
+                onTap: () {
+                  session.lock();
+                  browser.reloadPage();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_forever_outlined),
+                title: const Text('Forget this browser'),
+                subtitle: const Text(
+                  'Deletes Drive sign-in and vault passwords from this browser. Files stay in Drive.',
+                ),
+                onTap: () async {
+                  final proceed = await confirm(
+                    context,
+                    title: 'Forget this browser?',
+                    message:
+                        'You will need your OAuth client, a new Google sign-in and your vault password to open '
+                        'the vault again here.',
+                    confirmLabel: 'Forget',
+                  );
+                  if (!proceed) return;
+                  await session.forget();
+                  browser.reloadPage();
+                },
+              ),
+            ]),
           _Section('About', [
             ListTile(
               leading: const Icon(Icons.info_outline),

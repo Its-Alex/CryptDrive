@@ -1,8 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../core/google_oauth.dart';
 import '../core/vault_service.dart';
+import '../platform/browser_api.dart' as browser;
 import 'widgets.dart';
 
 const oauthClientDocsUrl = 'https://github.com/Its-Alex/CryptDrive/blob/main/docs/google-oauth-client.md';
@@ -52,15 +55,25 @@ class _GoogleAuthFormState extends State<GoogleAuthForm> {
       _error = null;
     });
     try {
-      final token = await widget.vault.authorizeGoogleDrive(
-        clientId: _clientId.text.trim(),
-        clientSecret: _clientSecret.text.trim(),
-        openUrl: (url) async {
-          if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-            if (mounted) setState(() => _error = 'Open this address in a browser: $url');
-          }
-        },
-      );
+      final String token;
+      if (kIsWeb) {
+        final oauth = GoogleBrowserOAuth(
+          clientId: _clientId.text.trim(),
+          clientSecret: _clientSecret.text.trim(),
+          redirectUri: browserRedirectUri,
+        );
+        token = await oauth.exchange(await browser.runOAuthPopup(oauth.authorizationUrl));
+      } else {
+        token = await widget.vault.authorizeGoogleDrive(
+          clientId: _clientId.text.trim(),
+          clientSecret: _clientSecret.text.trim(),
+          openUrl: (url) async {
+            if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+              if (mounted) setState(() => _error = 'Open this address in a browser: $url');
+            }
+          },
+        );
+      }
       await _submit(token);
     } catch (error) {
       if (mounted) setState(() => _error = describeError(error));
@@ -89,10 +102,28 @@ class _GoogleAuthFormState extends State<GoogleAuthForm> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Google requires your own OAuth client (type "Desktop app", scope "drive"). '
-          'It takes about five minutes in the Google Cloud console.',
-        ),
+        if (kIsWeb) ...[
+          Text(
+            'Google requires your own OAuth client of type "Web application", scope "drive", with '
+            '${browserRedirectUri.origin} as authorized JavaScript origin and this redirect URI:',
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: SelectableText('$browserRedirectUri', style: const TextStyle(fontFamily: 'monospace')),
+              ),
+              IconButton(
+                tooltip: 'Copy',
+                icon: const Icon(Icons.copy),
+                onPressed: () => Clipboard.setData(ClipboardData(text: '$browserRedirectUri')),
+              ),
+            ],
+          ),
+        ] else
+          const Text(
+            'Google requires your own OAuth client (type "Desktop app", scope "drive"). '
+            'It takes about five minutes in the Google Cloud console.',
+          ),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
@@ -182,3 +213,6 @@ class _GoogleAuthFormState extends State<GoogleAuthForm> {
     );
   }
 }
+
+/// Where Google sends the browser back after sign-in: web/oauth_callback.html, next to the app.
+Uri get browserRedirectUri => Uri.base.resolve('oauth_callback.html');

@@ -8,6 +8,7 @@ import 'state/providers.dart';
 import 'ui/home_shell.dart';
 import 'ui/onboarding_screen.dart';
 import 'ui/theme.dart';
+import 'ui/unlock_screen.dart';
 import 'ui/widgets.dart';
 
 /// Riverpod 3 retries failed providers by default; bootstrap failures need the user instead.
@@ -67,7 +68,13 @@ class _RootState extends ConsumerState<_Root> {
     final screen = environment.when(
       loading: () => const LoadingScreen(message: 'Starting…'),
       error: (error, _) => _BootstrapErrorScreen(error: error),
-      data: (_) {
+      data: (environment) {
+        final unlocked = ref.watch(configUnlockedProvider);
+        if (unlocked.value != true) {
+          return unlocked.isLoading
+              ? const LoadingScreen(message: 'Starting…')
+              : UnlockScreen(session: environment.browser!);
+        }
         final status = ref.watch(setupStatusProvider);
         return status.when(
           loading: () => const LoadingScreen(message: 'Reading configuration…'),
