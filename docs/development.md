@@ -55,7 +55,7 @@ it needs neither a desktop session nor root.
 |--------|---------|
 | AppImage | `cd app && flutter build linux --release && ../tools/package-appimage.sh` |
 | APK | `cd app && flutter build apk --release --split-per-abi` |
-| msix | `cd app && flutter build windows --release && dart run msix:create` (Windows) |
+| Windows installer | `cd app && flutter build windows --release`, then `iscc /DAppVersion=<version> tools\windows-installer.iss` ([Inno Setup](https://jrsoftware.org/isinfo.php) 6, on Windows) |
 | dmg | `cd app && flutter build macos --release && hdiutil create …` (see CI) |
 | iOS | `cd app && flutter build ios --release --no-codesign` |
 

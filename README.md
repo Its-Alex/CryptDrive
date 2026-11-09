@@ -18,7 +18,7 @@ on every platform, and without a sync client, FUSE mount or local mirror.
 |----------|------|--------|
 | Linux | 1 — built and tested | AppImage |
 | Android | 1 — built and tested (emulator) | APK per ABI |
-| Windows | 2 — CI-built | msix (experimental) |
+| Windows | 2 — CI-built | setup .exe and portable zip (experimental) |
 | macOS | 3 — CI-built, untested | dmg (experimental) |
 | iOS | 3 — CI-built, untested | unsigned build (experimental) |
 

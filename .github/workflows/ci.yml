@@ -153,18 +153,23 @@ jobs:
           install_args: go flutter
       - name: Build cryptdrive.dll
         run: native/build.sh windows-x64
-      - name: Build and package (msix, zip)
+      - name: Build
         working-directory: app
+        run: flutter build windows --release
+      - name: Package (installer, zip)
+        env:
+          MSYS_NO_PATHCONV: "1"
         run: |
-          flutter build windows --release
-          dart run msix:create
-          mv build/windows/x64/runner/Release/CryptDrive.msix build/CryptDrive-windows-x64.msix
-          (cd build/windows/x64/runner/Release && 7z a -tzip ../../../../CryptDrive-windows-x64.zip . > /dev/null)
+          iscc="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          [ -x "$iscc" ] || choco install innosetup --yes --no-progress > /dev/null
+          version="$(sed -n 's/^version: \([^+]*\).*/\1/p' app/pubspec.yaml)"
+          "$iscc" /Q "/DAppVersion=$version" tools/windows-installer.iss
+          (cd app/build/windows/x64/runner/Release && 7z a -tzip ../../../../CryptDrive-windows-x64.zip . > /dev/null)
       - uses: actions/upload-artifact@v7
         with:
           name: cryptdrive-windows
           path: |
-            app/build/CryptDrive-windows-x64.msix
+            app/build/CryptDrive-windows-x64-setup.exe
             app/build/CryptDrive-windows-x64.zip
           if-no-files-found: error
 
