@@ -91,6 +91,15 @@ class _FilesTabState extends ConsumerState<FilesTab> {
     }
   }
 
+  Future<void> _reload() async {
+    _refresh();
+    if (_query.isNotEmpty) {
+      await ref.read(searchProvider(_query).future).catchError((_) => <VaultEntry>[]);
+    } else {
+      await ref.read(folderProvider(_directory).future).catchError((_) => <VaultEntry>[]);
+    }
+  }
+
   Future<void> _onShared(List<SharedMediaFile> shared) async {
     final files = shared
         .where((item) => item.type != SharedMediaType.text && item.type != SharedMediaType.url)
@@ -232,12 +241,12 @@ class _FilesTabState extends ConsumerState<FilesTab> {
     );
     if (destination == null || !mounted) return;
     final folder = destination.replaceAll(RegExp(r'^/+|/+$'), '');
-    if (folder == _directory) return;
+    if (entries.every((entry) => parentVaultPath(entry.path) == folder)) return;
     setState(() => _hidden.addAll(entries.map((e) => e.path)));
     _clearSelection();
     final moved = await _actions.moveMany(entries, folder);
     if (!mounted) return;
-    await ref.read(folderProvider(_directory).future).catchError((_) => <VaultEntry>[]);
+    await _reload();
     if (mounted) setState(() => _hidden.removeAll(entries.map((e) => e.path)));
     if (mounted && moved.isNotEmpty) {
       showMessage(context, 'Moved ${moved.length} to ${folder.isEmpty ? 'Vault' : folder}');
@@ -260,7 +269,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
     _clearSelection();
     await _actions.deleteMany(entries);
     if (!mounted) return;
-    await ref.read(folderProvider(_directory).future).catchError((_) => <VaultEntry>[]);
+    await _reload();
     if (mounted) setState(() => _hidden.removeAll(entries.map((e) => e.path)));
   }
 
@@ -290,9 +299,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
     setState(() => _hidden.add(entry.path));
     final deleted = await _actions.delete(entry);
     if (!mounted) return;
-    if (deleted) {
-      await ref.read(folderProvider(parentVaultPath(entry.path)).future).catchError((_) => <VaultEntry>[]);
-    }
+    if (deleted) await _reload();
     if (mounted) setState(() => _hidden.remove(entry.path));
   }
 
@@ -326,7 +333,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
                 children: [
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 150),
-                    child: _selecting && !searching ? _selectionBar() : _searchHeader(),
+                    child: _selecting ? _selectionBar() : _searchHeader(),
                   ),
                   AnimatedSize(
                     duration: const Duration(milliseconds: 200),
@@ -519,6 +526,8 @@ class _FilesTabState extends ConsumerState<FilesTab> {
       loading: () => const SkeletonList(),
       error: (error, _) => ErrorView(error: error, onRetry: _refresh),
       data: (entries) {
+        final visible = entries.where((entry) => !_hidden.contains(entry.path)).toList();
+        _visibleEntries = visible;
         if (entries.isEmpty) {
           return _Message(
             icon: Icons.search_off,
@@ -528,9 +537,9 @@ class _FilesTabState extends ConsumerState<FilesTab> {
         }
         return ListView.builder(
           padding: const EdgeInsets.only(bottom: 96),
-          itemCount: entries.length,
+          itemCount: visible.length,
           itemBuilder: (context, index) {
-            final entry = entries[index];
+            final entry = visible[index];
             final parent = parentVaultPath(entry.path);
             return EntryRow(
               key: Key('result:${entry.path}'),
@@ -538,8 +547,11 @@ class _FilesTabState extends ConsumerState<FilesTab> {
               vault: _vault,
               transfer: transfers[entry.path],
               subtitleOverride: 'in ${parent.isEmpty ? 'Vault' : parent} · ${describeEntry(entry)}',
-              onTap: () => entry.isDir ? _open(entry.path) : _actions.run(entry, EntryAction.open),
+              onTap: () => _onTap(entry),
               onMenu: () => _onMenu(entry),
+              onLongPress: () => _toggleSelection(entry),
+              onIconTap: () => _toggleSelection(entry),
+              selected: _selecting ? _selection.containsKey(entry.path) : null,
             );
           },
         );

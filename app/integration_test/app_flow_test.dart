@@ -143,8 +143,16 @@ void main() {
     await pumpUntilFound(tester, find.byKey(const Key('entry:Photos')));
     await tester.enterText(find.byKey(const Key('searchField')), 'phot');
     await pumpUntilFound(tester, find.byKey(const Key('result:Photos')));
+    // Search results are selectable too, and the bulk actions reach their folders.
+    await tester.longPress(find.byKey(const Key('result:Photos')));
+    await pumpUntilFound(tester, find.text('1 selected'));
+    await tester.tap(find.byKey(const Key('deleteSelected')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirmButton')));
+    await pumpUntilGone(tester, find.byKey(const Key('result:Photos')));
+    await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
     await tester.tap(find.byTooltip('Clear'));
-    await pumpUntilFound(tester, find.byKey(const Key('entry:Photos')));
+    await pumpUntilGone(tester, find.byKey(const Key('entry:Photos')));
 
     await tester.tap(find.byKey(const Key('openRecent')));
     await pumpUntilFound(tester, find.text('Files you open or upload show up here.'));
