@@ -9,5 +9,8 @@ Pre-release: everything except live Google sign-in is tested (see [docs/manual-v
 | `CryptDrive-windows-x64.zip` | Windows x64, portable | Experimental. Extract and run `cryptdrive.exe` |
 | `CryptDrive-macos.dmg` | macOS | Experimental, unsigned, untested |
 | `CryptDrive-unsigned-ios.zip` | iOS | Experimental, unsigned, untested: needs re-signing to install |
+| `CryptDrive-web.tar.gz` | Web, any static host | Zero-knowledge web app: files are encrypted in the browser. Serve over HTTPS ([docs/web.md](https://github.com/Its-Alex/CryptDrive/blob/main/docs/web.md)) |
 
 Before the first launch, create your own Google OAuth client: [docs/google-oauth-client.md](https://github.com/Its-Alex/CryptDrive/blob/main/docs/google-oauth-client.md). `SHA256SUMS` lists the checksums of every file.
+
+Web app as a container image (static files only, port 8080): `docker run -p 8080:8080 ghcr.io/its-alex/cryptdrive-web:latest` (or the tag of this release without its `v`), then put it behind an HTTPS reverse proxy.
