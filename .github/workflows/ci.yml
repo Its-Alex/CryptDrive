@@ -24,9 +24,12 @@ jobs:
     name: Native bridge (Go tests)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           install_args: go rclone
       - name: gofmt
         working-directory: native
@@ -37,13 +40,16 @@ jobs:
     name: Linux (tier 1)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: System libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libsecret-1-dev libegl1 libgles2 libgl1-mesa-dri dbus gnupg
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           install_args: go flutter cmake ninja conda:clang rclone
       - name: Build libcryptdrive.so
         run: mise run native:linux
@@ -65,7 +71,7 @@ jobs:
           flutter build linux --release
           ../tools/package-appimage.sh
           tar -czf build/CryptDrive-linux-x86_64.tar.gz -C build/linux/x64/release --transform 's,^bundle,CryptDrive,' bundle
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cryptdrive-linux-x86_64
           path: |
@@ -77,15 +83,18 @@ jobs:
     name: Android (tier 1)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Free disk space
         # The runner's preinstalled SDKs leave too little room for mise's Android SDK, the NDK and Gradle.
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
           sudo docker image prune --all --force > /dev/null
           df -h /
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           install_args: go flutter java android-sdk
       - name: Android SDK packages
         run: |
@@ -98,7 +107,7 @@ jobs:
         run: |
           flutter build apk --release
           mv build/app/outputs/flutter-apk/app-release.apk build/CryptDrive-android.apk
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cryptdrive-android-apk
           path: app/build/CryptDrive-android.apk
@@ -108,7 +117,9 @@ jobs:
     name: Android emulator app flow (tier 1)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Free disk space
         # The runner's preinstalled SDKs leave too little room for mise's Android SDK, the NDK and Gradle.
         run: |
@@ -120,8 +131,9 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           install_args: go flutter java android-sdk
       - name: Android SDK packages
         run: |
@@ -139,9 +151,12 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           install_args: go flutter node
       - name: Build the browser engine and check it under Node
         run: mise run test:web-engine
@@ -153,7 +168,7 @@ jobs:
         run: |
           flutter build web --release --no-web-resources-cdn
           tar -czf build/CryptDrive-web.tar.gz -C build --transform 's,^web,CryptDrive-web,' web
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cryptdrive-web
           path: app/build/CryptDrive-web.tar.gz
@@ -161,20 +176,22 @@ jobs:
       - name: Build the web app for GitHub Pages (served under /<repository>/)
         if: startsWith(github.ref, 'refs/tags/v') && vars.DEPLOY_PAGES == 'true'
         working-directory: app
-        run: flutter build web --release --no-web-resources-cdn --base-href "/${{ github.event.repository.name }}/" --output build/pages
-      - uses: actions/upload-pages-artifact@v5
+        env:
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: flutter build web --release --no-web-resources-cdn --base-href "/$REPOSITORY_NAME/" --output build/pages
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         if: startsWith(github.ref, 'refs/tags/v') && vars.DEPLOY_PAGES == 'true'
         with:
           path: app/build/pages
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - id: image
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/its-alex/cryptdrive-web
           tags: |
@@ -182,7 +199,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
       - name: Build (and on tags, push) the container image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         env:
           # Otherwise the build record is uploaded as an artifact and ends up in the release.
           DOCKER_BUILD_RECORD_UPLOAD: false
@@ -209,7 +226,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
   windows:
     name: Windows (tier 2, experimental)
@@ -219,16 +236,19 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
-      - uses: msys2/setup-msys2@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
         with:
           msystem: UCRT64
           install: mingw-w64-ucrt-x86_64-gcc
       - name: Put MinGW gcc on PATH for cgo
         shell: msys2 {0}
         run: cygpath -w /ucrt64/bin >> "$GITHUB_PATH"
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
+          cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           install_args: go flutter
       - name: Build cryptdrive.dll
         run: native/build.sh windows-x64
@@ -244,7 +264,7 @@ jobs:
           version="$(sed -n 's/^version: \([^+]*\).*/\1/p' app/pubspec.yaml)"
           "$iscc" /Q "/DAppVersion=$version" tools/windows-installer.iss
           (cd app/build/windows/x64/runner/Release && 7z a -tzip ../../../../CryptDrive-windows-x64.zip . > /dev/null)
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cryptdrive-windows
           path: |
@@ -257,9 +277,12 @@ jobs:
     runs-on: macos-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           install_args: go flutter
       - name: Build universal libcryptdrive.dylib
         run: mise run native:macos
@@ -268,7 +291,7 @@ jobs:
         run: |
           flutter build macos --release
           hdiutil create -volname CryptDrive -srcfolder build/macos/Build/Products/Release/CryptDrive.app -ov -format UDZO build/CryptDrive-macos.dmg
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cryptdrive-macos-dmg
           path: app/build/CryptDrive-macos.dmg
@@ -279,9 +302,12 @@ jobs:
     runs-on: macos-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           install_args: go flutter
       - name: Build libcryptdrive.a (c-archive)
         run: mise run native:ios
@@ -290,7 +316,7 @@ jobs:
         run: |
           flutter build ios --release --no-codesign
           cd build/ios/iphoneos && zip -qr ../../CryptDrive-unsigned-ios.zip Runner.app
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cryptdrive-ios-unsigned
           path: app/build/CryptDrive-unsigned-ios.zip
@@ -309,8 +335,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           pattern: cryptdrive-*
