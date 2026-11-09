@@ -90,18 +90,15 @@ jobs:
           sdkmanager --install "platform-tools" "platforms;android-36" "platforms/android-37.0" "build-tools;36.0.0" "ndk;${NDK_VERSION}"
       - name: Build libcryptdrive.so for every ABI
         run: mise run native:android
-      - name: Build release APKs
+      - name: Build release APK (all ABIs)
         working-directory: app
         run: |
-          flutter build apk --release --split-per-abi
-          for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
-            abi="${apk##*/app-}"
-            mv "$apk" "build/CryptDrive-android-${abi%-release.apk}.apk"
-          done
+          flutter build apk --release
+          mv build/app/outputs/flutter-apk/app-release.apk build/CryptDrive-android.apk
       - uses: actions/upload-artifact@v7
         with:
-          name: cryptdrive-android-apks
-          path: app/build/CryptDrive-android-*.apk
+          name: cryptdrive-android-apk
+          path: app/build/CryptDrive-android.apk
           if-no-files-found: error
 
   android-emulator:

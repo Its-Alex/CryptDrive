@@ -3,9 +3,7 @@ Pre-release: everything except live Google sign-in is tested (see [docs/manual-v
 | File | Platform | Notes |
 |------|----------|-------|
 | `CryptDrive-x86_64.AppImage` | Linux x86_64 | Needs a Secret Service (GNOME Keyring, KWallet…) |
-| `CryptDrive-android-arm64-v8a.apk` | Android, most phones | Signed with a debug key |
-| `CryptDrive-android-armeabi-v7a.apk` | Android, older 32-bit phones | Signed with a debug key |
-| `CryptDrive-android-x86_64.apk` | Android emulators, x86 tablets | Signed with a debug key |
+| `CryptDrive-android.apk` | Android 7+, every phone and emulator (arm64, arm, x86_64) | Allow installs from your browser or file manager when Android asks |
 | `CryptDrive-windows-x64.msix` / `.zip` | Windows x64 | Experimental; the msix uses a test certificate |
 | `CryptDrive-macos.dmg` | macOS | Experimental, unsigned, untested |
 | `CryptDrive-unsigned-ios.zip` | iOS | Experimental, unsigned, untested: needs re-signing to install |
