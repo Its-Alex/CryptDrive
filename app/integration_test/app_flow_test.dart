@@ -87,8 +87,40 @@ void main() {
     await tester.tap(find.byKey(const Key('askTextConfirm')));
     await pumpUntilGone(tester, find.byKey(const Key('entry:plans.txt')));
 
+    // Multiple selection: long-press starts it, taps add to it, then one move for all.
+    for (final name in ['a.txt', 'b.txt', 'c.txt']) {
+      final file = File(p.join(runDir.path, 'staging', name));
+      await file.writeAsString('file $name');
+      await environment.vault.upload(file, '');
+    }
+    await tester.tap(find.byTooltip('Refresh'));
+    await pumpUntilFound(tester, find.byKey(const Key('entry:c.txt')));
+    await tester.longPress(find.byKey(const Key('entry:a.txt')));
+    await pumpUntilFound(tester, find.text('1 selected'));
+    await tester.tap(find.byKey(const Key('entry:b.txt')));
+    await tester.tap(find.byKey(const Key('select:c.txt')));
+    await pumpUntilFound(tester, find.text('3 selected'));
+    await tester.tap(find.byKey(const Key('moveSelected')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('askTextField')), 'Photos');
+    await tester.tap(find.byKey(const Key('askTextConfirm')));
+    await pumpUntilGone(tester, find.byKey(const Key('entry:c.txt')));
+    await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
+
     await tester.tap(find.byKey(const Key('entry:Photos')));
     await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/plans.txt')));
+    await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/c.txt')));
+    await tester.longPress(find.byKey(const Key('entry:Photos/a.txt')));
+    await pumpUntilFound(tester, find.text('1 selected'));
+    await tester.tap(find.byKey(const Key('entry:Photos/b.txt')));
+    await tester.tap(find.byKey(const Key('entry:Photos/c.txt')));
+    await pumpUntilFound(tester, find.text('3 selected'));
+    await tester.tap(find.byKey(const Key('deleteSelected')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirmButton')));
+    await pumpUntilGone(tester, find.byKey(const Key('entry:Photos/a.txt')));
+    await pumpUntilGone(tester, find.byKey(const Key('entry:Photos/c.txt')));
+    expect(find.byKey(const Key('entry:Photos/plans.txt')), findsOneWidget);
 
     final decrypted = await environment.vault.decryptToTemp((await environment.vault.list('Photos')).single);
     expect(await decrypted.readAsString(), 'meet at the old oak tree');

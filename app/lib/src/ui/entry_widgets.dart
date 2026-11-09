@@ -143,6 +143,9 @@ class EntryRow extends StatelessWidget {
     this.transfer,
     this.busy = false,
     this.subtitleOverride,
+    this.onLongPress,
+    this.onIconTap,
+    this.selected,
   });
 
   final VaultEntry entry;
@@ -152,6 +155,13 @@ class EntryRow extends StatelessWidget {
   final Transfer? transfer;
   final bool busy;
   final String? subtitleOverride;
+  final VoidCallback? onLongPress;
+
+  /// Tapping the icon selects the row, like a checkbox.
+  final VoidCallback? onIconTap;
+
+  /// Null outside selection mode; true or false while rows are being selected.
+  final bool? selected;
 
   @override
   Widget build(BuildContext context) {
@@ -162,54 +172,80 @@ class EntryRow extends StatelessWidget {
         ? '${running.kind == TransferKind.upload ? 'Encrypting and uploading' : 'Decrypting'}…'
               '${running.fraction == null ? '' : ' ${(running.fraction! * 100).round()}%'}'
         : subtitleOverride ?? describeEntry(entry);
-    return InkWell(
-      onTap: running == null && !busy ? onTap : null,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
-        child: Row(
-          children: [
-            EntryIcon(entry: entry, vault: vault),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: textTheme.bodyLarge),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                  ),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 200),
-                    child: running == null
-                        ? const SizedBox(width: double.infinity)
-                        : Padding(
-                            padding: const EdgeInsets.only(top: 6, right: 12),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(2),
-                              child: LinearProgressIndicator(value: running.fraction, minHeight: 3),
+    final idle = running == null && !busy;
+    final isSelected = selected ?? false;
+    final icon = AnimatedSwitcher(
+      duration: const Duration(milliseconds: 150),
+      transitionBuilder: (child, animation) => ScaleTransition(scale: animation, child: child),
+      child: isSelected
+          ? Container(
+              key: const ValueKey('selected'),
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(color: scheme.primary, borderRadius: BorderRadius.circular(10)),
+              child: Icon(Icons.check, color: scheme.onPrimary),
+            )
+          : EntryIcon(key: const ValueKey('icon'), entry: entry, vault: vault),
+    );
+    return Material(
+      color: isSelected ? scheme.secondaryContainer : Colors.transparent,
+      child: InkWell(
+        onTap: idle ? onTap : null,
+        onLongPress: idle ? onLongPress : null,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+          child: Row(
+            children: [
+              GestureDetector(
+                key: Key('select:${entry.path}'),
+                onTap: idle ? onIconTap : null,
+                behavior: HitTestBehavior.opaque,
+                child: icon,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: textTheme.bodyLarge),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 200),
+                      child: running == null
+                          ? const SizedBox(width: double.infinity)
+                          : Padding(
+                              padding: const EdgeInsets.only(top: 6, right: 12),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(2),
+                                child: LinearProgressIndicator(value: running.fraction, minHeight: 3),
+                              ),
                             ),
-                          ),
-                  ),
-                ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-            if (busy)
-              const Padding(
-                padding: EdgeInsets.all(14),
-                child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-              )
-            else
-              IconButton(
-                key: Key('menu:${entry.path}'),
-                tooltip: 'More',
-                icon: const Icon(Icons.more_vert),
-                onPressed: running == null ? onMenu : null,
-              ),
-          ],
+              if (busy)
+                const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                )
+              else if (selected != null)
+                const SizedBox(width: 48, height: 48)
+              else
+                IconButton(
+                  key: Key('menu:${entry.path}'),
+                  tooltip: 'More',
+                  icon: const Icon(Icons.more_vert),
+                  onPressed: running == null ? onMenu : null,
+                ),
+            ],
+          ),
         ),
       ),
     );

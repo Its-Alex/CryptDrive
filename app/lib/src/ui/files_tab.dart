@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
@@ -30,6 +31,16 @@ class _FilesTabState extends ConsumerState<FilesTab> {
 
   /// Deleted optimistically: hidden until the folder listing no longer has them.
   final _hidden = <String>{};
+
+  /// Selected entries of the current folder, in selection order.
+  final _selection = <String, VaultEntry>{};
+  String? _selectionAnchor;
+
+  /// Holds keyboard focus for the selection shortcuts (Escape, Ctrl+A, Delete).
+  final _shortcutsFocus = FocusNode(debugLabel: 'files');
+  List<VaultEntry> _visibleEntries = const [];
+
+  bool get _selecting => _selection.isNotEmpty;
   StreamSubscription<List<SharedMediaFile>>? _sharedFiles;
 
   VaultService get _vault => ref.read(environmentProvider).requireValue.vault;
@@ -38,7 +49,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   @override
   void initState() {
     super.initState();
-    if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)) {
+    if (_onPhone) {
       _sharedFiles = ReceiveSharingIntent.instance.getMediaStream().listen(_onShared);
       ReceiveSharingIntent.instance.getInitialMedia().then((files) {
         _onShared(files);
@@ -52,11 +63,13 @@ class _FilesTabState extends ConsumerState<FilesTab> {
     _sharedFiles?.cancel();
     _searchDebounce?.cancel();
     _search.dispose();
+    _shortcutsFocus.dispose();
     super.dispose();
   }
 
   void _open(String directory) {
     _search.clear();
+    _selection.clear();
     setState(() {
       _directory = directory;
       _query = '';
@@ -162,8 +175,105 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   }
 
   Future<void> _onTap(VaultEntry entry) async {
+    _shortcutsFocus.requestFocus();
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isShiftPressed && _selectionAnchor != null) return _selectRange(entry);
+    if (keyboard.isControlPressed || keyboard.isMetaPressed || _selecting) return _toggleSelection(entry);
     if (entry.isDir) return _open(entry.path);
     await _actions.run(entry, EntryAction.open);
+  }
+
+  void _toggleSelection(VaultEntry entry) {
+    _shortcutsFocus.requestFocus();
+    setState(() {
+      if (_selection.remove(entry.path) == null) _selection[entry.path] = entry;
+      _selectionAnchor = entry.path;
+    });
+  }
+
+  void _selectRange(VaultEntry entry) {
+    final paths = _visibleEntries.map((e) => e.path).toList();
+    final from = paths.indexOf(_selectionAnchor!);
+    final to = paths.indexOf(entry.path);
+    if (from == -1 || to == -1) return _toggleSelection(entry);
+    setState(() {
+      for (final selected in _visibleEntries.sublist(from < to ? from : to, (from < to ? to : from) + 1)) {
+        _selection[selected.path] = selected;
+      }
+    });
+  }
+
+  void _selectAll() => setState(() {
+    for (final entry in _visibleEntries) {
+      _selection[entry.path] = entry;
+    }
+  });
+
+  void _clearSelection() => setState(() {
+    _selection.clear();
+    _selectionAnchor = null;
+  });
+
+  List<VaultEntry> get _selectedEntries => _selection.values.toList();
+
+  bool get _onPhone =>
+      !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+
+  bool get _selectionHasOnlyFiles => _selection.values.every((entry) => !entry.isDir);
+
+  Future<void> _moveSelected() async {
+    final entries = _selectedEntries;
+    final destination = await askText(
+      context,
+      title: 'Move ${entries.length} ${entries.length == 1 ? 'item' : 'items'}',
+      label: 'Destination folder (empty = vault root)',
+      initialValue: _directory,
+      confirmLabel: 'Move',
+    );
+    if (destination == null || !mounted) return;
+    final folder = destination.replaceAll(RegExp(r'^/+|/+$'), '');
+    if (folder == _directory) return;
+    setState(() => _hidden.addAll(entries.map((e) => e.path)));
+    _clearSelection();
+    final moved = await _actions.moveMany(entries, folder);
+    if (!mounted) return;
+    await ref.read(folderProvider(_directory).future).catchError((_) => <VaultEntry>[]);
+    if (mounted) setState(() => _hidden.removeAll(entries.map((e) => e.path)));
+    if (mounted && moved.isNotEmpty) {
+      showMessage(context, 'Moved ${moved.length} to ${folder.isEmpty ? 'Vault' : folder}');
+    }
+  }
+
+  Future<void> _deleteSelected() async {
+    final entries = _selectedEntries;
+    final folders = entries.where((e) => e.isDir).length;
+    final proceed = await confirm(
+      context,
+      title: 'Delete ${entries.length} ${entries.length == 1 ? 'item' : 'items'}?',
+      message: folders == 0
+          ? 'The selected files will be deleted.'
+          : 'The selected files and folders, with everything in them, will be deleted.',
+      confirmLabel: 'Delete',
+    );
+    if (!proceed || !mounted) return;
+    setState(() => _hidden.addAll(entries.map((e) => e.path)));
+    _clearSelection();
+    await _actions.deleteMany(entries);
+    if (!mounted) return;
+    await ref.read(folderProvider(_directory).future).catchError((_) => <VaultEntry>[]);
+    if (mounted) setState(() => _hidden.removeAll(entries.map((e) => e.path)));
+  }
+
+  Future<void> _saveSelected() async {
+    final files = _selectedEntries;
+    _clearSelection();
+    await _actions.saveCopies(files);
+  }
+
+  Future<void> _shareSelected() async {
+    final files = _selectedEntries;
+    _clearSelection();
+    await _actions.shareMany(files);
   }
 
   Future<void> _onMenu(VaultEntry entry) async {
@@ -190,76 +300,155 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   Widget build(BuildContext context) {
     final searching = _query.isNotEmpty;
     return PopScope(
-      canPop: _directory.isEmpty && !searching,
+      canPop: _directory.isEmpty && !searching && !_selecting,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        if (_selecting) return _clearSelection();
         if (searching) return _open(_directory);
         _open(parentVaultPath(_directory));
       },
-      child: Scaffold(
-        body: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: SearchBar(
-                        key: const Key('searchField'),
-                        controller: _search,
-                        hintText: 'Search in vault',
-                        leading: const Icon(Icons.search),
-                        trailing: [
-                          if (_search.text.isNotEmpty)
-                            IconButton(
-                              tooltip: 'Clear',
-                              icon: const Icon(Icons.close),
-                              onPressed: () => _open(_directory),
-                            ),
-                        ],
-                        onChanged: (text) {
-                          setState(() {});
-                          _onSearchChanged(text);
-                        },
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): _clearSelection,
+          const SingleActivator(LogicalKeyboardKey.keyA, control: true): _selectAll,
+          const SingleActivator(LogicalKeyboardKey.keyA, meta: true): _selectAll,
+          const SingleActivator(LogicalKeyboardKey.delete): () {
+            if (_selecting) _deleteSelected();
+          },
+        },
+        child: Focus(
+          focusNode: _shortcutsFocus,
+          autofocus: true,
+          child: Scaffold(
+            body: SafeArea(
+              bottom: false,
+              child: Column(
+                children: [
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 150),
+                    child: _selecting && !searching ? _selectionBar() : _searchHeader(),
+                  ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 200),
+                    child: searching
+                        ? const SizedBox(width: double.infinity)
+                        : _Breadcrumbs(directory: _directory, onOpen: _open),
+                  ),
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      switchInCurve: Curves.easeOutCubic,
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(
+                          position: Tween(begin: const Offset(0.04, 0), end: Offset.zero).animate(animation),
+                          child: child,
+                        ),
+                      ),
+                      child: KeyedSubtree(
+                        key: ValueKey(searching ? 'search:$_query' : 'dir:$_directory'),
+                        child: searching ? _searchResults() : _folderContents(),
                       ),
                     ),
-                    IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: _refresh),
-                  ],
-                ),
-              ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 200),
-                child: searching
-                    ? const SizedBox(width: double.infinity)
-                    : _Breadcrumbs(directory: _directory, onOpen: _open),
-              ),
-              Expanded(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  switchInCurve: Curves.easeOutCubic,
-                  transitionBuilder: (child, animation) => FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween(begin: const Offset(0.04, 0), end: Offset.zero).animate(animation),
-                      child: child,
-                    ),
                   ),
-                  child: KeyedSubtree(
-                    key: ValueKey(searching ? 'search:$_query' : 'dir:$_directory'),
-                    child: searching ? _searchResults() : _folderContents(),
-                  ),
-                ),
+                ],
               ),
-            ],
+            ),
+            floatingActionButton: _selecting
+                ? null
+                : FloatingActionButton(
+                    key: const Key('addButton'),
+                    tooltip: 'Add',
+                    onPressed: _showAddSheet,
+                    child: const Icon(Icons.add),
+                  ),
           ),
         ),
-        floatingActionButton: FloatingActionButton(
-          key: const Key('addButton'),
-          tooltip: 'Add',
-          onPressed: _showAddSheet,
-          child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Widget _searchHeader() {
+    return Padding(
+      key: const ValueKey('searchHeader'),
+      padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: SearchBar(
+              key: const Key('searchField'),
+              controller: _search,
+              hintText: 'Search in vault',
+              leading: const Icon(Icons.search),
+              trailing: [
+                if (_search.text.isNotEmpty)
+                  IconButton(tooltip: 'Clear', icon: const Icon(Icons.close), onPressed: () => _open(_directory)),
+              ],
+              onChanged: (text) {
+                setState(() {});
+                _onSearchChanged(text);
+              },
+            ),
+          ),
+          IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: _refresh),
+        ],
+      ),
+    );
+  }
+
+  Widget _selectionBar() {
+    final count = _selection.length;
+    final filesOnly = _selectionHasOnlyFiles;
+    return Padding(
+      key: const ValueKey('selectionBar'),
+      padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
+      child: SizedBox(
+        height: 48,
+        child: Row(
+          children: [
+            IconButton(
+              key: const Key('clearSelection'),
+              tooltip: 'Clear selection',
+              icon: const Icon(Icons.close),
+              onPressed: _clearSelection,
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                '$count selected',
+                key: const Key('selectionCount'),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            IconButton(tooltip: 'Select all', icon: const Icon(Icons.select_all), onPressed: _selectAll),
+            // Phones save through the share sheet; there is no folder to pick there.
+            if (filesOnly && !_onPhone)
+              IconButton(
+                key: const Key('saveSelected'),
+                tooltip: kIsWeb ? 'Download' : 'Save decrypted copies',
+                icon: const Icon(Icons.download_outlined),
+                onPressed: _saveSelected,
+              ),
+            if (filesOnly && canShareFiles)
+              IconButton(
+                key: const Key('shareSelected'),
+                tooltip: 'Share',
+                icon: const Icon(Icons.share_outlined),
+                onPressed: _shareSelected,
+              ),
+            IconButton(
+              key: const Key('moveSelected'),
+              tooltip: 'Move',
+              icon: const Icon(Icons.drive_file_move_outline),
+              onPressed: _moveSelected,
+            ),
+            IconButton(
+              key: const Key('deleteSelected'),
+              tooltip: 'Delete',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _deleteSelected,
+            ),
+          ],
         ),
       ),
     );
@@ -278,6 +467,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
             .where((t) => t.kind == TransferKind.upload && t.directory == directory && !listed.contains(t.path))
             .toList();
         final visible = entries.where((entry) => !_hidden.contains(entry.path)).toList();
+        _visibleEntries = visible;
         if (visible.isEmpty && pendingUploads.isEmpty) return const _EmptyFolder();
         return RefreshIndicator(
           onRefresh: () => ref.refresh(folderProvider(directory).future),
@@ -299,7 +489,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
               final entry = visible[index - pendingUploads.length];
               return Dismissible(
                 key: ValueKey('dismiss:${entry.path}'),
-                direction: DismissDirection.endToStart,
+                direction: _selecting ? DismissDirection.none : DismissDirection.endToStart,
                 background: const _DeleteBackground(),
                 confirmDismiss: (_) => confirmDelete(context, entry),
                 onDismissed: (_) => _deleteOptimistically(entry),
@@ -310,6 +500,9 @@ class _FilesTabState extends ConsumerState<FilesTab> {
                   transfer: transfers[entry.path],
                   onTap: () => _onTap(entry),
                   onMenu: () => _onMenu(entry),
+                  onLongPress: () => _toggleSelection(entry),
+                  onIconTap: () => _toggleSelection(entry),
+                  selected: _selecting ? _selection.containsKey(entry.path) : null,
                 ),
               );
             },

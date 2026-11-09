@@ -1,11 +1,11 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:cryptdrive/src/app.dart';
 import 'package:cryptdrive/src/core/bootstrap.dart';
 import 'package:cryptdrive/src/state/providers.dart';
 import 'package:cryptdrive_native/cryptdrive_native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -92,6 +92,25 @@ void main() {
     await chooseMenuAction(tester, 'big.bin', 'Delete');
     await tester.tap(find.byKey(const Key('confirmButton')));
     await pumpUntilGone(tester, find.byKey(const Key('entry:big.bin')));
+
+    // Multiple selection, with the keyboard shortcuts of a desktop browser.
+    for (final name in ['x.txt', 'y.txt']) {
+      await environment.vault.uploadBytes(Uint8List.fromList(utf8.encode(name)), '', name);
+    }
+    await tester.tap(find.byTooltip('Refresh'));
+    await pumpUntilFound(tester, find.byKey(const Key('entry:y.txt')));
+    await tester.longPress(find.byKey(const Key('entry:x.txt')));
+    await pumpUntilFound(tester, find.text('1 selected'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape, physicalKey: PhysicalKeyboardKey.escape);
+    await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
+    await tester.tap(find.byKey(const Key('select:x.txt')));
+    await tester.tap(find.byKey(const Key('entry:y.txt')));
+    await pumpUntilFound(tester, find.text('2 selected'));
+    await tester.tap(find.byKey(const Key('deleteSelected')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirmButton')));
+    await pumpUntilGone(tester, find.byKey(const Key('entry:x.txt')));
+    await pumpUntilGone(tester, find.byKey(const Key('entry:y.txt')));
 
     await tester.tap(find.byKey(const Key('entry:Photos')));
     await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/plans.txt')));
