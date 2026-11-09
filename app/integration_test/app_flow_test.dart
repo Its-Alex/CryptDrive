@@ -19,7 +19,10 @@ void main() {
 
   testWidgets('onboarding, upload, browse, CRUD and preview', (tester) async {
     final support = await getApplicationSupportDirectory();
-    final runDir = Directory(p.join(support.path, 'integration-test-${DateTime.now().millisecondsSinceEpoch}'));
+    // A fixed path: if Android recreates the activity, the test reruns in a process whose
+    // native library is already initialized with this config path.
+    final runDir = Directory(p.join(support.path, 'integration-test'));
+    if (await runDir.exists()) await runDir.delete(recursive: true);
     final directories = AppDirectories(
       support: Directory(p.join(runDir.path, 'support')),
       temporary: Directory(p.join(runDir.path, 'tmp')),
@@ -31,6 +34,13 @@ void main() {
     addTearDown(container.dispose);
 
     await tester.pumpWidget(UncontrolledProviderScope(container: container, child: const CryptDriveApp()));
+    final startedEnvironment = await container.read(environmentProvider.future);
+    // Remotes left in the native library's memory by a previous run in the same process.
+    final leftovers = (await startedEnvironment.rclone.call('config/listremotes'))['remotes'] as List? ?? [];
+    for (final remote in leftovers) {
+      await startedEnvironment.rclone.call('config/delete', {'name': remote});
+    }
+    container.invalidate(setupStatusProvider);
     await pumpUntilFound(tester, find.text('Set up CryptDrive'));
 
     // Real keystore: the config password went to flutter_secure_storage, the config is encrypted on disk.
