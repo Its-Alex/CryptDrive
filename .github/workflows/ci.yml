@@ -64,10 +64,13 @@ jobs:
         run: |
           flutter build linux --release
           ../tools/package-appimage.sh
+          tar -czf build/CryptDrive-linux-x86_64.tar.gz -C build/linux/x64/release --transform 's,^bundle,CryptDrive,' bundle
       - uses: actions/upload-artifact@v7
         with:
-          name: cryptdrive-linux-x86_64-appimage
-          path: app/build/CryptDrive-x86_64.AppImage
+          name: cryptdrive-linux-x86_64
+          path: |
+            app/build/CryptDrive-x86_64.AppImage
+            app/build/CryptDrive-linux-x86_64.tar.gz
           if-no-files-found: error
 
   android:
