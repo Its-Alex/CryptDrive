@@ -1,7 +1,7 @@
 name: cryptdrive
 description: "One encrypted Google Drive client: rclone crypt, client-side, on every platform."
 publish_to: 'none'
-version: 0.2.2+6
+version: 0.2.3+7
 
 environment:
   sdk: ^3.13.7
