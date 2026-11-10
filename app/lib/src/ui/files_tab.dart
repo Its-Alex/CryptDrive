@@ -176,8 +176,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
 
   Future<void> _uploadFiles(List<XFile> files) async {
     if (kIsWeb) {
-      final payload = [for (final file in files) (name: file.name, bytes: await file.readAsBytes())];
-      if (mounted) await _actions.uploadPicked(payload, _directory);
+      if (mounted) await _actions.uploadPicked(files, _directory);
       return;
     }
     final stagingDir = await Directory.systemTemp.createTemp('cryptdrive-upload');

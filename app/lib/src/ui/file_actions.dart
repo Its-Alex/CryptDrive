@@ -154,22 +154,28 @@ class FileActions {
   }
 
   /// Browser: encrypts and uploads files picked in the browser, kept in memory meanwhile.
-  Future<void> uploadPicked(List<({String name, Uint8List bytes})> files, String directory) async {
+  Future<void> uploadPicked(List<XFile> files, String directory) async {
     await Future.wait(
       files.map((file) async {
         final path = joinVaultPath(directory, file.name);
+        // The row goes up before the bytes are read: a large file spends seconds in
+        // readAsBytes() and in the copies down to the worker, all before rclone starts.
         _transfers.start(TransferKind.upload, path);
         try {
+          final bytes = await file.readAsBytes();
           await _vault.uploadBytes(
-            file.bytes,
+            bytes,
             directory,
             file.name,
-            onProgress: (progress) => _transfers.progress(path, progress.fraction),
+            onProgress: (progress) => _transfers.progress(
+              path,
+              progress.fraction ?? (bytes.isEmpty ? null : (progress.bytes / bytes.length).clamp(0.0, 1.0).toDouble()),
+            ),
           );
           await ref
               .read(recentFilesProvider.notifier)
               .record(
-                VaultEntry(path: path, name: file.name, isDir: false, size: file.bytes.length, modTime: DateTime.now()),
+                VaultEntry(path: path, name: file.name, isDir: false, size: bytes.length, modTime: DateTime.now()),
                 RecentAction.uploaded,
               );
         } catch (error) {
