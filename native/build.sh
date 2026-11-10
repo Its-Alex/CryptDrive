@@ -95,7 +95,15 @@ ios)
 	;;
 web)
 	web_dir="$native_dir/../app/web/cryptdrive"
-	(cd "$native_dir" && GOOS=js GOARCH=wasm go build "${go_flags[@]}" -o "$web_dir/cryptdrive.wasm" ./wasm)
+	# net/http on js/wasm only uses fetch when the transport has no dial hook, and rclone
+	# always sets one, so build from a vendored copy with patches/_fshttp/http.go swapped in.
+	work="$(mktemp -d "${TMPDIR:-/tmp}/cryptdrive-web-build.XXXXXX")"
+	trap 'rm -r "$work"' EXIT
+	mkdir -p "$work/native"
+	cp -a "$native_dir/go.mod" "$native_dir/go.sum" "$native_dir/main.go" "$native_dir/bridge" "$native_dir/wasm" "$work/native/"
+	(cd "$work/native" && go mod vendor)
+	cp "$native_dir/patches/_fshttp/http.go" "$work/native/vendor/github.com/rclone/rclone/fs/fshttp/http.go"
+	(cd "$work/native" && GOOS=js GOARCH=wasm go build "${go_flags[@]}" -o "$web_dir/cryptdrive.wasm" ./wasm)
 	cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" "$web_dir/wasm_exec.js"
 	;;
 *)
