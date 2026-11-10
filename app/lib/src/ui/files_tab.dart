@@ -545,10 +545,11 @@ class _FilesTabState extends ConsumerState<FilesTab> {
     );
   }
 
-  /// Running transfers, independent of the folder on screen: the inline row is
-  /// filtered to the current directory, this is not.
+  /// Running transfers that have no row of their own on screen: the inline row only covers
+  /// the folder being looked at, and drawing both would show two bars for one upload.
   Widget _transferStrip() {
-    final active = ref.watch(transfersProvider).values.toList();
+    final directory = _directory;
+    final active = ref.watch(transfersProvider).values.where((t) => t.directory != directory).toList();
     if (active.isEmpty) return const SizedBox.shrink();
     final theme = Theme.of(context);
     return Column(
