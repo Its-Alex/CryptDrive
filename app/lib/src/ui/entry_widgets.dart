@@ -168,10 +168,14 @@ class EntryRow extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
     final running = transfer;
-    final subtitle = running != null
-        ? '${running.kind == TransferKind.upload ? 'Encrypting and uploading' : 'Decrypting'}…'
-              '${running.fraction == null ? '' : ' ${(running.fraction! * 100).round()}%'}'
-        : subtitleOverride ?? describeEntry(entry);
+    // The row outlives the last byte while the folder re-lists; the bar stays full meanwhile.
+    final progress = running == null
+        ? null
+        : running.fraction == 1
+        ? 'Finishing…'
+        : '${running.kind == TransferKind.upload ? 'Encrypting and uploading' : 'Decrypting'}…'
+              '${running.fraction == null ? '' : ' ${(running.fraction! * 100).round()}%'}';
+    final subtitle = progress ?? subtitleOverride ?? describeEntry(entry);
     final idle = running == null && !busy;
     final isSelected = selected ?? false;
     final icon = AnimatedSwitcher(

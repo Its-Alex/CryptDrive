@@ -175,11 +175,23 @@ class FileActions {
         } catch (error) {
           if (context.mounted) showMessage(context, 'Upload of ${file.name} failed: ${describeError(error)}');
         } finally {
-          _transfers.finish(path);
-          _refresh(directory);
+          await _refreshThenFinish(directory, path);
         }
       }),
     );
+  }
+
+  /// Re-lists before dropping the progress row: dropping it first leaves the file
+  /// invisible for as long as the folder takes to list again (seconds on Drive).
+  Future<void> _refreshThenFinish(String directory, String path) async {
+    ref.invalidate(folderProvider(directory));
+    try {
+      await ref.read(folderProvider(directory).future);
+    } catch (_) {
+      // The listing renders its own error; the upload outcome is already reported.
+    } finally {
+      _transfers.finish(path);
+    }
   }
 
   /// Returns true when the entry left its folder (moved or deleted).
