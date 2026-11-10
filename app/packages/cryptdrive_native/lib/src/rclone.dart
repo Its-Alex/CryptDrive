@@ -116,15 +116,29 @@ class Rclone {
     while (!finished) {
       await Future.any([result, Future<void>.delayed(const Duration(milliseconds: 200))]).catchError((_) => null);
       if (finished) break;
-      final stats = await call('core/stats', {'group': group});
-      onProgress(
-        JobProgress(
-          bytes: (stats['bytes'] as num?)?.toInt() ?? 0,
-          totalBytes: (stats['totalBytes'] as num?)?.toInt() ?? 0,
-        ),
-      );
+      onProgress(_progressFrom(await call('core/stats', {'group': group})));
     }
     return result;
+  }
+
+  /// Reads the transfers in flight, not the session totals: `core/stats` reports
+  /// `bytes` accumulated over every transfer of the session while `totalBytes` only
+  /// covers the ones running now, so their ratio is meaningless (5× on a second upload).
+  static JobProgress _progressFrom(Map<String, dynamic> stats) {
+    final inFlight = (stats['transferring'] as List?)?.whereType<Map<String, dynamic>>().toList() ?? const [];
+    if (inFlight.isEmpty) {
+      return JobProgress(
+        bytes: (stats['bytes'] as num?)?.toInt() ?? 0,
+        totalBytes: (stats['totalBytes'] as num?)?.toInt() ?? 0,
+      );
+    }
+    var bytes = 0;
+    var totalBytes = 0;
+    for (final transfer in inFlight) {
+      bytes += (transfer['bytes'] as num?)?.toInt() ?? 0;
+      totalBytes += (transfer['size'] as num?)?.toInt() ?? 0;
+    }
+    return JobProgress(bytes: bytes, totalBytes: totalBytes);
   }
 
   /// Stops in-flight jobs, then finalizes the library.
