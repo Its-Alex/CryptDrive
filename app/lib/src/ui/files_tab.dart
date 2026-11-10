@@ -413,6 +413,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
                               ? const SizedBox(width: double.infinity)
                               : _Breadcrumbs(directory: _directory, onOpen: _open),
                         ),
+                        _transferStrip(),
                         Expanded(
                           child: AnimatedSwitcher(
                             duration: const Duration(milliseconds: 220),
@@ -541,6 +542,55 @@ class _FilesTabState extends ConsumerState<FilesTab> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Running transfers, independent of the folder on screen: the inline row is
+  /// filtered to the current directory, this is not.
+  Widget _transferStrip() {
+    final active = ref.watch(transfersProvider).values.toList();
+    if (active.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Column(
+      key: const Key('transferStrip'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final transfer in active)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      transfer.kind == TransferKind.upload ? Icons.cloud_upload_outlined : Icons.lock_open_outlined,
+                      size: 16,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        transfer.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                    if (transfer.fraction != null)
+                      Text('${(transfer.fraction! * 100).round()}%', style: theme.textTheme.bodySmall),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(value: transfer.fraction, minHeight: 3),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 8),
+      ],
     );
   }
 
