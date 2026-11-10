@@ -47,8 +47,10 @@ class WebTransport implements RcloneTransport {
 
   @override
   Future<void> putFile(String fs, String remote, Uint8List data, String statsGroup) async {
-    // The buffer is transferred to the worker: send a copy so the caller's bytes stay usable.
-    await _invoke('putFile', [fs.toJS, remote.toJS, Uint8List.fromList(data).toJS, statsGroup.toJS]);
+    // toJS clones a Dart-built Uint8List into a fresh JSUint8Array, so transferring its
+    // buffer to the worker detaches the clone and leaves these bytes usable; an extra
+    // Uint8List.fromList would only add a second full pass over the file on the UI thread.
+    await _invoke('putFile', [fs.toJS, remote.toJS, data.toJS, statsGroup.toJS]);
   }
 
   @override

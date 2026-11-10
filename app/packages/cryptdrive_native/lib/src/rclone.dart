@@ -25,7 +25,7 @@ class JobProgress {
   final int bytes;
   final int totalBytes;
 
-  double? get fraction => totalBytes > 0 ? bytes / totalBytes : null;
+  double? get fraction => totalBytes > 0 ? (bytes / totalBytes).clamp(0.0, 1.0).toDouble() : null;
 }
 
 /// Async facade over the rclone engine, native (FFI) or in the browser (WebAssembly).
