@@ -1,13 +1,13 @@
 import 'dart:io';
 
 import 'package:cryptdrive_native/cryptdrive_native.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../platform/browser_api.dart' as browser;
 import 'app_store.dart';
+import 'perf_log.dart';
 import 'secret_store.dart';
 import 'vault_service.dart';
 
@@ -194,7 +194,7 @@ class StartupClock {
 
   void mark(String phase) {
     final now = _watch.elapsed;
-    debugPrint('cryptdrive startup: $phase in ${(now - _last).inMilliseconds} ms');
+    perfLog('cryptdrive startup: $phase in ${(now - _last).inMilliseconds} ms');
     _last = now;
   }
 }

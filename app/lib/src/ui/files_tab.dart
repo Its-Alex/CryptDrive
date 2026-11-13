@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
+import '../core/perf_log.dart';
 import '../core/vault_service.dart';
 import '../state/providers.dart';
 import '../state/transfers.dart';
@@ -129,6 +130,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   Future<void> _pickAndUpload() async {
     final picked = await FilePicker.pickFiles(dialogTitle: 'Upload to vault');
     if (picked.isEmpty || !mounted) return;
+    perfLog('[upload] picker window closed on ${picked.length} file(s): ${picked.map((file) => file.name).join(', ')}');
     await _uploadFiles([for (final file in picked) file.xFile]);
   }
 
