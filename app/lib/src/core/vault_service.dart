@@ -159,6 +159,7 @@ class VaultService {
 
   Future<void> cancelAuthorization() async {
     try {
+      if ((await rclone.call('config/oauthstatus'))['status'] != 'running') return;
       await rclone.call('config/oauthstop');
     } on RcloneException {
       // No authorization in progress.
