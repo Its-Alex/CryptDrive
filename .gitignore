@@ -120,3 +120,5 @@ app.*.symbols
 
 # CryptDrive: pubspec.lock is part of the reproducible toolchain
 !app/pubspec.lock
+
+.playwright-mcp/
