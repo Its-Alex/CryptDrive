@@ -52,6 +52,17 @@ They are plain `go build -buildmode=c-shared` / `c-archive` commands; see
 ([pass-secret-service](https://github.com/grimsteel/pass-secret-service)), so
 it needs neither a desktop session nor root.
 
+## Performance logs
+
+`perfLog` (`app/lib/src/core/perf_log.dart`) stamps each timing with its
+wall-clock time. Debug and profile builds print them; release builds print
+nothing unless built with `--dart-define=CRYPTDRIVE_PERF_LOG=true`, which is
+how a slow start gets diagnosed on someone else's machine.
+
+```sh
+cd app && flutter build linux --release --dart-define=CRYPTDRIVE_PERF_LOG=true
+```
+
 ## Packaging
 
 | Target | Command |
