@@ -9,6 +9,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
+import '../core/perf_log.dart';
 import '../core/vault_service.dart';
 import '../platform/browser_api.dart' as browser;
 import '../state/providers.dart';
@@ -159,13 +160,13 @@ class FileActions {
       files.map((file) async {
         final path = joinVaultPath(directory, file.name);
         final watch = Stopwatch()..start();
-        debugPrint('[upload] ${file.name}: row up');
+        perfLog('[upload] ${file.name}: row up');
         // The row goes up before the bytes are read: a large file spends seconds in
         // readAsBytes() and in the copies down to the worker, all before rclone starts.
         _transfers.start(TransferKind.upload, path);
         try {
           final bytes = await file.readAsBytes();
-          debugPrint('[upload] ${file.name}: ${bytes.length} B read at ${watch.elapsedMilliseconds} ms');
+          perfLog('[upload] ${file.name}: ${bytes.length} B read at ${watch.elapsedMilliseconds} ms');
           await _vault.uploadBytes(
             bytes,
             directory,
@@ -175,7 +176,7 @@ class FileActions {
               progress.fraction ?? (bytes.isEmpty ? null : (progress.bytes / bytes.length).clamp(0.0, 1.0).toDouble()),
             ),
           );
-          debugPrint('[upload] ${file.name}: engine done at ${watch.elapsedMilliseconds} ms');
+          perfLog('[upload] ${file.name}: engine done at ${watch.elapsedMilliseconds} ms');
           await ref
               .read(recentFilesProvider.notifier)
               .record(
@@ -186,7 +187,7 @@ class FileActions {
           if (context.mounted) showMessage(context, 'Upload of ${file.name} failed: ${describeError(error)}');
         } finally {
           await _refreshThenFinish(directory, path);
-          debugPrint('[upload] ${file.name}: listed at ${watch.elapsedMilliseconds} ms');
+          perfLog('[upload] ${file.name}: listed at ${watch.elapsedMilliseconds} ms');
         }
       }),
     );
