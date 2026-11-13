@@ -43,6 +43,15 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   final _selection = <String, VaultEntry>{};
   String? _selectionAnchor;
 
+  /// Rows picked by the last Shift-click or long-press drag, so the next range
+  /// can shrink without dropping rows picked one by one.
+  final _rangeSelection = <String>{};
+
+  /// Each row's bounds, to map a dragged finger back to a row.
+  final _rowKeys = <String, GlobalKey>{};
+  String? _rowKeysScope;
+  String? _dragRow;
+
   /// Set by the Select button, so selection can start without a long press.
   bool _selectionMode = false;
 
@@ -81,6 +90,8 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   void _open(String directory) {
     _search.clear();
     _selection.clear();
+    _rangeSelection.clear();
+    _selectionAnchor = null;
     _selectionMode = false;
     setState(() {
       _directory = directory;
@@ -261,7 +272,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   Future<void> _onTap(VaultEntry entry) async {
     _shortcutsFocus.requestFocus();
     final keyboard = HardwareKeyboard.instance;
-    if (keyboard.isShiftPressed && _selectionAnchor != null) return _selectRange(entry);
+    if (keyboard.isShiftPressed) return _extendSelection(entry);
     if (keyboard.isControlPressed || keyboard.isMetaPressed || _selecting) return _toggleSelection(entry);
     if (entry.isDir) return _open(entry.path);
     await _actions.run(entry, EntryAction.open);
@@ -270,24 +281,74 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   void _toggleSelection(VaultEntry entry) {
     _shortcutsFocus.requestFocus();
     setState(() {
+      _rangeSelection.remove(entry.path);
       if (_selection.remove(entry.path) == null) _selection[entry.path] = entry;
       _selectionAnchor = entry.path;
     });
   }
 
-  void _selectRange(VaultEntry entry) {
+  /// A row's bounds, so a long-press drag can tell which row the finger is over.
+  Widget _selectableRow(VaultEntry entry, Widget row) {
+    return GestureDetector(
+      key: _rowKeys.putIfAbsent(entry.path, () => GlobalKey(debugLabel: 'row:${entry.path}')),
+      onLongPressStart: (_) => _startDragSelection(entry),
+      onLongPressMoveUpdate: (details) => _dragSelectionTo(details.globalPosition),
+      onLongPressEnd: (_) => _dragRow = null,
+      child: row,
+    );
+  }
+
+  /// Long press selects the row and anchors there; dragging then extends the
+  /// range, like a file manager, without having to lift the finger.
+  void _startDragSelection(VaultEntry entry) {
+    _shortcutsFocus.requestFocus();
+    _dragRow = entry.path;
+    setState(() {
+      _selection[entry.path] = entry;
+      _selectionAnchor = entry.path;
+    });
+  }
+
+  void _dragSelectionTo(Offset globalPosition) {
+    final path = _pathAt(globalPosition);
+    if (path == null || path == _dragRow) return;
+    _dragRow = path;
+    _extendSelection(_visibleEntries.firstWhere((entry) => entry.path == path));
+  }
+
+  String? _pathAt(Offset globalPosition) {
+    for (final entry in _visibleEntries) {
+      final box = _rowKeys[entry.path]?.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) continue;
+      if ((box.localToGlobal(Offset.zero) & box.size).contains(globalPosition)) return entry.path;
+    }
+    return null;
+  }
+
+  /// Shift-click or drag: selects from the anchor to [entry], or just [entry]
+  /// when nothing was picked yet, so a range works on a fresh list.
+  void _extendSelection(VaultEntry entry) {
+    final anchor = _selectionAnchor;
     final paths = _visibleEntries.map((e) => e.path).toList();
-    final from = paths.indexOf(_selectionAnchor!);
+    final from = anchor == null ? -1 : paths.indexOf(anchor);
     final to = paths.indexOf(entry.path);
     if (from == -1 || to == -1) return _toggleSelection(entry);
+    final start = from < to ? from : to;
+    final range = _visibleEntries.sublist(start, (from < to ? to : from) + 1);
+    final rangePaths = {for (final selected in range) selected.path};
     setState(() {
-      for (final selected in _visibleEntries.sublist(from < to ? from : to, (from < to ? to : from) + 1)) {
+      _selection.removeWhere((path, _) => _rangeSelection.contains(path) && !rangePaths.contains(path));
+      for (final selected in range) {
         _selection[selected.path] = selected;
       }
+      _rangeSelection
+        ..clear()
+        ..addAll(rangePaths);
     });
   }
 
   void _selectAll() => setState(() {
+    _rangeSelection.clear();
     for (final entry in _visibleEntries) {
       _selection[entry.path] = entry;
     }
@@ -295,6 +356,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
 
   void _clearSelection() => setState(() {
     _selection.clear();
+    _rangeSelection.clear();
     _selectionAnchor = null;
     _selectionMode = false;
   });
@@ -387,6 +449,13 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   @override
   Widget build(BuildContext context) {
     final searching = _query.isNotEmpty;
+    // The folder list and the search results cross-fade for a frame, so two lists
+    // can hold the same rows at once and need their own row keys.
+    final scope = searching ? 'search:$_query' : 'dir:$_directory';
+    if (scope != _rowKeysScope) {
+      _rowKeysScope = scope;
+      _rowKeys.clear();
+    }
     return PopScope(
       canPop: _directory.isEmpty && !searching && !_selecting,
       onPopInvokedWithResult: (didPop, _) {
@@ -654,16 +723,18 @@ class _FilesTabState extends ConsumerState<FilesTab> {
                 background: const _DeleteBackground(),
                 confirmDismiss: (_) => confirmDelete(context, entry),
                 onDismissed: (_) => _deleteOptimistically(entry),
-                child: EntryRow(
-                  key: Key('entry:${entry.path}'),
-                  entry: entry,
-                  vault: _vault,
-                  transfer: transfers[entry.path],
-                  onTap: () => _onTap(entry),
-                  onMenu: () => _onMenu(entry),
-                  onLongPress: () => _toggleSelection(entry),
-                  onIconTap: () => _toggleSelection(entry),
-                  selected: _selecting ? _selection.containsKey(entry.path) : null,
+                child: _selectableRow(
+                  entry,
+                  EntryRow(
+                    key: Key('entry:${entry.path}'),
+                    entry: entry,
+                    vault: _vault,
+                    transfer: transfers[entry.path],
+                    onTap: () => _onTap(entry),
+                    onMenu: () => _onMenu(entry),
+                    onIconTap: () => _toggleSelection(entry),
+                    selected: _selecting ? _selection.containsKey(entry.path) : null,
+                  ),
                 ),
               );
             },
@@ -695,17 +766,19 @@ class _FilesTabState extends ConsumerState<FilesTab> {
           itemBuilder: (context, index) {
             final entry = visible[index];
             final parent = parentVaultPath(entry.path);
-            return EntryRow(
-              key: Key('result:${entry.path}'),
-              entry: entry,
-              vault: _vault,
-              transfer: transfers[entry.path],
-              subtitleOverride: 'in ${parent.isEmpty ? 'Vault' : parent} · ${describeEntry(entry)}',
-              onTap: () => _onTap(entry),
-              onMenu: () => _onMenu(entry),
-              onLongPress: () => _toggleSelection(entry),
-              onIconTap: () => _toggleSelection(entry),
-              selected: _selecting ? _selection.containsKey(entry.path) : null,
+            return _selectableRow(
+              entry,
+              EntryRow(
+                key: Key('result:${entry.path}'),
+                entry: entry,
+                vault: _vault,
+                transfer: transfers[entry.path],
+                subtitleOverride: 'in ${parent.isEmpty ? 'Vault' : parent} · ${describeEntry(entry)}',
+                onTap: () => _onTap(entry),
+                onMenu: () => _onMenu(entry),
+                onIconTap: () => _toggleSelection(entry),
+                selected: _selecting ? _selection.containsKey(entry.path) : null,
+              ),
             );
           },
         );

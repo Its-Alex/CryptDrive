@@ -143,7 +143,6 @@ class EntryRow extends StatelessWidget {
     this.transfer,
     this.busy = false,
     this.subtitleOverride,
-    this.onLongPress,
     this.onIconTap,
     this.selected,
   });
@@ -155,7 +154,6 @@ class EntryRow extends StatelessWidget {
   final Transfer? transfer;
   final bool busy;
   final String? subtitleOverride;
-  final VoidCallback? onLongPress;
 
   /// Tapping the icon selects the row, like a checkbox.
   final VoidCallback? onIconTap;
@@ -195,7 +193,6 @@ class EntryRow extends StatelessWidget {
       color: isSelected ? scheme.secondaryContainer : Colors.transparent,
       child: InkWell(
         onTap: idle ? onTap : null,
-        onLongPress: idle ? onLongPress : null,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
           child: Row(

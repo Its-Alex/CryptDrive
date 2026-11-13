@@ -4,7 +4,9 @@ import 'package:cryptdrive/src/app.dart';
 import 'package:cryptdrive/src/core/bootstrap.dart';
 import 'package:cryptdrive/src/state/providers.dart';
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -111,6 +113,15 @@ void main() {
     await tester.tap(find.byKey(const Key('entry:b.txt')));
     await tester.tap(find.byKey(const Key('select:c.txt')));
     await pumpUntilFound(tester, find.text('3 selected'));
+    await tester.tap(find.byKey(const Key('clearSelection')));
+    await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
+    // Shift-click picks the range from the clicked row, even with nothing selected yet.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
+    await tester.tap(find.byKey(const Key('entry:a.txt')));
+    await pumpUntilFound(tester, find.text('1 selected'));
+    await tester.tap(find.byKey(const Key('entry:c.txt')));
+    await pumpUntilFound(tester, find.text('3 selected'));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
     await tester.tap(find.byKey(const Key('moveSelected')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('askTextField')), 'Photos');
@@ -126,6 +137,24 @@ void main() {
     await tester.tap(find.byKey(const Key('entry:Photos/b.txt')));
     await tester.tap(find.byKey(const Key('entry:Photos/c.txt')));
     await pumpUntilFound(tester, find.text('3 selected'));
+    await tester.tap(find.byKey(const Key('clearSelection')));
+    await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
+    // Touch multi-selection: long press, then drag, the range following the finger
+    // and shrinking when it comes back up.
+    Finder row(String name) => find.byKey(Key('entry:Photos/$name'));
+    final drag = await tester.startGesture(tester.getCenter(row('a.txt')));
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+    await pumpUntilFound(tester, find.text('1 selected'));
+    await drag.moveTo(tester.getCenter(row('c.txt')));
+    await tester.pump();
+    await pumpUntilFound(tester, find.text('3 selected'));
+    await drag.moveTo(tester.getCenter(row('b.txt')));
+    await tester.pump();
+    await pumpUntilFound(tester, find.text('2 selected'));
+    await drag.moveTo(tester.getCenter(row('c.txt')));
+    await tester.pump();
+    await pumpUntilFound(tester, find.text('3 selected'));
+    await drag.up();
     await tester.tap(find.byKey(const Key('deleteSelected')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('confirmButton')));
