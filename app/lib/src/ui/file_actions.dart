@@ -9,6 +9,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
+import '../core/drop_folder_plan.dart';
 import '../core/perf_log.dart';
 import '../core/vault_service.dart';
 import '../platform/browser_api.dart' as browser;
@@ -204,6 +205,93 @@ class FileActions {
     } finally {
       _transfers.finish(path);
     }
+  }
+
+  /// Uploads a dropped folder: creates every folder it holds, then its files a
+  /// few at a time, with one summary message at the end.
+  Future<void> uploadFolder(FolderUploadPlan plan, String target) async {
+    for (final folder in plan.folders) {
+      await _attempt(() => _vault.createFolder(folder));
+    }
+    final failures = <String>[];
+    final refreshed = <String>{target};
+    await _forEachLimited(plan.files, (file) async {
+      final directory = parentVaultPath(file.vaultPath);
+      _transfers.start(TransferKind.upload, file.vaultPath);
+      try {
+        await _vault.upload(
+          File(file.localPath),
+          directory,
+          name: p.basename(file.vaultPath),
+          onProgress: (progress) => _transfers.progress(file.vaultPath, progress.fraction),
+        );
+      } catch (error) {
+        failures.add('${p.basename(file.vaultPath)}: ${describeError(error)}');
+      } finally {
+        await _refreshThenFinish(directory, file.vaultPath);
+        refreshed.add(directory);
+      }
+    });
+    refreshed.forEach(_refresh);
+    if (context.mounted) _reportFolderUpload(plan.folders.first, plan.files.length, failures);
+  }
+
+  /// Browser: the same tree, with every file already in memory.
+  Future<void> uploadFolderInMemory(List<MemoryUpload> files, String target) async {
+    final failures = <String>[];
+    final refreshed = <String>{target};
+    await _forEachLimited(files, (file) async {
+      final path = joinVaultPath(target, file.path);
+      final directory = parentVaultPath(path);
+      _transfers.start(TransferKind.upload, path);
+      try {
+        await _vault.uploadBytes(
+          file.bytes,
+          directory,
+          p.basename(path),
+          onProgress: (progress) => _transfers.progress(path, progress.fraction),
+        );
+      } catch (error) {
+        failures.add('${p.basename(path)}: ${describeError(error)}');
+      } finally {
+        await _refreshThenFinish(directory, path);
+        refreshed.add(directory);
+      }
+    });
+    refreshed.forEach(_refresh);
+    final destination = files.isEmpty ? target : joinVaultPath(target, files.first.path.split('/').first);
+    if (context.mounted) _reportFolderUpload(destination, files.length, failures);
+  }
+
+  /// A dropped tree can hold thousands of files: never one rclone job per file
+  /// at once.
+  static const uploadConcurrency = 4;
+
+  Future<void> _forEachLimited<T>(List<T> items, Future<void> Function(T) task) async {
+    var next = 0;
+    Future<void> worker() async {
+      while (next < items.length) {
+        await task(items[next++]);
+      }
+    }
+
+    await Future.wait([for (var i = 0; i < uploadConcurrency; i++) worker()]);
+  }
+
+  void _reportFolderUpload(String destination, int total, List<String> failures) {
+    final where = destination.isEmpty ? 'the vault root' : destination;
+    if (failures.isEmpty) {
+      showMessage(
+        context,
+        total == 0 ? 'Created $where' : 'Uploaded $total ${total == 1 ? 'file' : 'files'} to $where',
+      );
+      return;
+    }
+    showMessage(
+      context,
+      'Uploaded ${total - failures.length} of $total files to $where; '
+      '${failures.first}${failures.length == 1 ? '' : ' and ${failures.length - 1} more'} failed',
+    );
   }
 
   /// Returns true when the entry left its folder (moved or deleted).

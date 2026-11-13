@@ -29,6 +29,9 @@ cd app && flutter run -d linux     # or run the AppImage from CI
 - [ ] Create a vault (folder `CryptDrive`, a password).
 - [ ] Drag a file from the file manager onto the list: the overlay names the
       folder, and the file uploads encrypted.
+- [ ] Drag a **folder** with a subfolder and an empty subfolder onto the list:
+      it appears as one folder, its files land in it, and the empty subfolder
+      survives.
 - [ ] Open [drive.google.com](https://drive.google.com): the `CryptDrive`
       folder only contains encrypted names.
 
@@ -64,6 +67,8 @@ behind HTTPS, or on `http://localhost:8080` for a local check, and create a
       `Location` header): it appears on the laptop.
 - [ ] Drag files from the desktop onto the browser tab: the overlay names the
       folder, and the files upload into it.
+- [ ] Drag a folder from the desktop onto the tab: it uploads with its
+      subfolders (empty ones are lost, the tab's storage keeps none).
 
 ## 6. rclone CLI compatibility
 

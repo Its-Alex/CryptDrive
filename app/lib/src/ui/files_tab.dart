@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
+import '../core/drop_folder_plan.dart';
 import '../core/perf_log.dart';
 import '../core/vault_service.dart';
 import '../state/providers.dart';
@@ -136,44 +137,61 @@ class _FilesTabState extends ConsumerState<FilesTab> {
 
   Future<void> _onDropped(DropDoneDetails details) async {
     if (mounted) setState(() => _dragging = false);
-    final files = <XFile>[];
-    var folders = 0;
+    final files = <DropItem>[];
+    final folders = <DropItem>[];
     for (final item in details.files) {
-      // Linux delivers a directory as a file path, macOS as DropItemDirectory.
-      final isFolder =
-          item is DropItemDirectory ||
-          (!kIsWeb && await FileSystemEntity.type(item.path) == FileSystemEntityType.directory);
-      if (isFolder) {
-        folders++;
-      } else {
-        files.add(item);
+      (await _isDroppedFolder(item) ? folders : files).add(item);
+    }
+    if (files.isEmpty && folders.isEmpty) return;
+    final scoped = await _openSecurityScopes(details.files);
+    try {
+      if (files.isNotEmpty) await _uploadFiles(files);
+      for (final folder in folders) {
+        await _uploadFolder(folder);
+      }
+    } finally {
+      for (final item in scoped) {
+        await DesktopDrop.instance.stopAccessingSecurityScopedResource(bookmark: item.extraAppleBookmark!);
       }
     }
-    if (files.isEmpty) {
-      if (folders > 0 && mounted) {
-        showMessage(context, 'Folders can\'t be dropped: open one and drop the files inside.');
+  }
+
+  /// macOS and browsers report a directory as [DropItemDirectory]; Linux and
+  /// Windows hand over a plain path that has to be probed.
+  Future<bool> _isDroppedFolder(DropItem item) async {
+    if (item is DropItemDirectory) return true;
+    if (kIsWeb) return false;
+    return FileSystemEntity.isDirectory(item.path);
+  }
+
+  /// A folder dropped from outside the sandbox is only readable while its
+  /// security-scoped bookmark is open, files in it included.
+  Future<List<DropItem>> _openSecurityScopes(List<DropItem> items) async {
+    final opened = <DropItem>[];
+    for (final item in items) {
+      final bookmark = item.extraAppleBookmark;
+      if (bookmark == null ||
+          bookmark.isEmpty ||
+          !await DesktopDrop.instance.startAccessingSecurityScopedResource(bookmark: bookmark)) {
+        continue;
       }
+      opened.add(item);
+    }
+    return opened;
+  }
+
+  Future<void> _uploadFolder(DropItem folder) async {
+    if (kIsWeb) {
+      final uploads = await planDroppedFolderMemory(folder as DropItemDirectory);
+      if (uploads.isEmpty) {
+        if (mounted) showMessage(context, 'Nothing to upload in ${folder.name}.');
+        return;
+      }
+      if (mounted) await _actions.uploadFolderInMemory(uploads, _directory);
       return;
     }
-    if (folders > 0 && mounted) {
-      showMessage(context, 'Skipped $folders folder(s): drop files, not folders.');
-    }
-    final bookmarks = <DropItemFile>[];
-    try {
-      for (final file in files.whereType<DropItemFile>()) {
-        final bookmark = file.extraAppleBookmark;
-        if (bookmark != null &&
-            bookmark.isNotEmpty &&
-            await DesktopDrop.instance.startAccessingSecurityScopedResource(bookmark: bookmark)) {
-          bookmarks.add(file);
-        }
-      }
-      await _uploadFiles(files);
-    } finally {
-      for (final file in bookmarks) {
-        await DesktopDrop.instance.stopAccessingSecurityScopedResource(bookmark: file.extraAppleBookmark!);
-      }
-    }
+    final plan = await planFolderUpload(Directory(folder.path), _directory);
+    if (mounted) await _actions.uploadFolder(plan, _directory);
   }
 
   Future<void> _uploadFiles(List<XFile> files) async {
@@ -725,7 +743,7 @@ class _DropOverlay extends StatelessWidget {
                 Text('Drop to upload', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
                 Text(
-                  'Encrypted and added to ${directory.isEmpty ? 'the vault root' : directory}.',
+                  'Files and folders are encrypted and added to ${directory.isEmpty ? 'the vault root' : directory}.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
                 ),

@@ -186,6 +186,32 @@ void main() {
     await tester.tap(find.byKey(const Key('confirmButton')));
     await pumpUntilGone(tester, find.byKey(const Key('entry:dropped-one.txt')));
 
+    // Dropping a folder uploads its whole tree, empty folders included.
+    final tree = Directory(p.join(dropDir.path, 'dropped-tree'))..createSync();
+    File(p.join(tree.path, 'top.txt')).writeAsStringSync('top of the tree');
+    Directory(p.join(tree.path, 'inner')).createSync();
+    File(p.join(tree.path, 'inner', 'deep.txt')).writeAsStringSync('deep down');
+    Directory(p.join(tree.path, 'inner', 'empty')).createSync();
+    dropTarget.onDragDone!(
+      DropDoneDetails(
+        files: [DropItemDirectory(tree.path, const [])],
+        localPosition: Offset.zero,
+        globalPosition: Offset.zero,
+      ),
+    );
+    await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-tree')));
+    await tester.tap(find.byKey(const Key('entry:dropped-tree')));
+    await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-tree/top.txt')));
+    await tester.tap(find.byKey(const Key('entry:dropped-tree/inner')));
+    await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-tree/inner/deep.txt')));
+    await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-tree/inner/empty')));
+    final inner = await environment.vault.list('dropped-tree/inner');
+    expect(inner.map((entry) => (entry.name, entry.isDir)), containsAll([('deep.txt', false), ('empty', true)]));
+    final decryptedDeep = await environment.vault.decryptToTemp(inner.firstWhere((entry) => !entry.isDir));
+    expect(await decryptedDeep.readAsString(), 'deep down');
+    await tester.tap(find.text('Vault'));
+    await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-tree')));
+
     await tester.tap(find.byKey(const Key('openRecent')));
     await pumpUntilFound(tester, find.text('Files you open or upload show up here.'));
     await tester.tap(find.byKey(const Key('openSettings')));
