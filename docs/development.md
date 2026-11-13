@@ -58,7 +58,7 @@ it needs neither a desktop session nor root.
 |--------|---------|
 | AppImage | `cd app && flutter build linux --release && ../tools/package-appimage.sh` |
 | APK | `cd app && flutter build apk --release` |
-| Web | `cd app && flutter build web --release --no-web-resources-cdn`, then `docker build -f deploy/web/Dockerfile --build-context site=app/build/web deploy/web` |
+| Web | `cd app && flutter build web --release --no-web-resources-cdn`, then `docker build -f deploy/web/Dockerfile --build-context site=app/build/web deploy/web` (local runs must stay on `http://localhost:8080`, see [web.md](web.md#local-development)) |
 | Windows installer | `cd app && flutter build windows --release`, then `iscc /DAppVersion=<version> tools\windows-installer.iss` ([Inno Setup](https://jrsoftware.org/isinfo.php) 6, on Windows) |
 | dmg | `cd app && flutter build macos --release && hdiutil create …` (see CI) |
 | iOS | `cd app && flutter build ios --release --no-codesign` |

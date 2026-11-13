@@ -15,6 +15,28 @@ Host (nginx, static files only)
 
 ## Run it
 
+### Local development
+
+```sh
+cd app
+mise exec -- flutter build web --profile --no-web-resources-cdn
+python3 -m http.server 8080 --bind 127.0.0.1 --directory build/web
+```
+
+Then open **<http://localhost:8080>**, and nothing else.
+
+- The port and the hostname are not free: the Web OAuth client has
+  `http://localhost:8080` as its authorized JavaScript origin and
+  `http://localhost:8080/oauth_callback.html` as its redirect URI. Google
+  refuses the consent popup from any other origin, so `:8091`,
+  `127.0.0.1:8080` and `localhost:8081` all fail at sign-in.
+- `flutter run -d web-server` can't serve this app: the CSP meta tag in
+  [`app/web/index.html`](../app/web/index.html) blocks CanvasKit fetched from
+  the CDN and the inline script dwds injects. Build as above, or delete that
+  one line for the session and restore it afterwards.
+- `--no-web-resources-cdn` is required — without it the build loads CanvasKit
+  from `gstatic.com`, which the same CSP blocks.
+
 ### Container image
 
 Each release publishes `ghcr.io/its-alex/cryptdrive-web`:
@@ -69,8 +91,10 @@ The desktop and mobile apps use a **Desktop app** client. The web app needs
 a **Web application** client, in the same Google Cloud project:
 
 1. [Google Auth Platform → Clients](https://console.cloud.google.com/auth/clients) → **Create client** → type **Web application**.
-2. **Authorized JavaScript origins**: the origin of your deployment, e.g. `https://drive.example.com`.
+2. **Authorized JavaScript origins**: the origin of your deployment, e.g. `https://drive.example.com`,
+   plus `http://localhost:8080` to run it locally (see [Local development](#local-development)).
 3. **Authorized redirect URIs**: `https://drive.example.com/oauth_callback.html`
+   and `http://localhost:8080/oauth_callback.html`
    (the app shows the exact value next to the client ID field).
 4. Copy the client ID and secret into the app and click **Sign in with Google**.
 
