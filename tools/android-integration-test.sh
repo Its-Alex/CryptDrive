@@ -36,10 +36,21 @@ adb install -r "$apk"
 adb logcat -c
 adb shell am start -W -n "$package/.MainActivity" >/dev/null
 log="$(mktemp)"
-for _ in $(seq 120); do
+finished=
+# A cold emulator plus the vault round-trip can take a while; ten minutes leaves
+# room for a slow runner without hiding a real failure.
+for _ in $(seq 200); do
 	sleep 3
 	adb logcat -d -s flutter >"$log"
-	if grep -qE "All tests passed!|Some tests failed" "$log"; then break; fi
+	if grep -qE "All tests passed!|Some tests failed" "$log"; then
+		finished=1
+		break
+	fi
 done
 grep -vE "NOTICE" "$log" | sed -n '/^.* flutter : [0-9][0-9]:[0-9][0-9] +/p;/EXCEPTION CAUGHT/,/^.*═══════$/p'
+if [ -z "$finished" ]; then
+	echo "The test never reported a result; last logcat lines:" >&2
+	tail -40 "$log" >&2
+	exit 1
+fi
 grep -q "All tests passed!" "$log"
