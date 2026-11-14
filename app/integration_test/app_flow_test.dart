@@ -280,6 +280,13 @@ void main() {
       await tester.tap(find.byKey(const Key('entry:c.txt')));
       await pumpUntilFound(tester, find.text('3 selected'));
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
+    } else {
+      // Touch has no Shift-click: long press starts the selection, taps add to it.
+      await tester.longPress(find.byKey(const Key('entry:a.txt')));
+      await pumpUntilFound(tester, find.text('1 selected'));
+      await controlClick(tester, find.byKey(const Key('entry:b.txt')));
+      await tester.tap(find.byKey(const Key('select:c.txt')));
+      await pumpUntilFound(tester, find.text('3 selected'));
     }
     await tester.tap(find.byKey(const Key('moveSelected')));
     await tester.pumpAndSettle();
