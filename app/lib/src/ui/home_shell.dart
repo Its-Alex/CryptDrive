@@ -1,18 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../state/providers.dart';
 import 'files_tab.dart';
 import 'recent_tab.dart';
 import 'settings_screen.dart';
 
-class HomeShell extends StatefulWidget {
+class HomeShell extends ConsumerWidget {
   const HomeShell({super.key});
-
-  @override
-  State<HomeShell> createState() => _HomeShellState();
-}
-
-class _HomeShellState extends State<HomeShell> {
-  int _tab = 0;
 
   static const _destinations = [
     (icon: Icons.folder_outlined, selected: Icons.folder, label: 'Files', key: Key('openFiles')),
@@ -20,14 +15,14 @@ class _HomeShellState extends State<HomeShell> {
     (icon: Icons.settings_outlined, selected: Icons.settings, label: 'Settings', key: Key('openSettings')),
   ];
 
-  void _select(int index) => setState(() => _tab = index);
-
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tab = ref.watch(homeTabProvider);
+    void select(int index) => ref.read(homeTabProvider.notifier).select(index);
     final body = IndexedStack(
-      index: _tab,
+      index: tab,
       children: [
-        FilesTab(active: _tab == 0),
+        FilesTab(active: tab == 0),
         const RecentTab(),
         const SettingsScreen(),
       ],
@@ -38,8 +33,8 @@ class _HomeShellState extends State<HomeShell> {
         body: Row(
           children: [
             NavigationRail(
-              selectedIndex: _tab,
-              onDestinationSelected: _select,
+              selectedIndex: tab,
+              onDestinationSelected: select,
               labelType: NavigationRailLabelType.all,
               backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
               leading: Padding(
@@ -63,8 +58,8 @@ class _HomeShellState extends State<HomeShell> {
     return Scaffold(
       body: body,
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: _select,
+        selectedIndex: tab,
+        onDestinationSelected: select,
         destinations: [
           for (final destination in _destinations)
             NavigationDestination(

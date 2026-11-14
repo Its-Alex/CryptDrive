@@ -5,12 +5,14 @@ import 'package:cross_file/cross_file.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
+import '../core/drive_shortcuts.dart';
 import '../core/drop_folder_plan.dart';
 import '../core/perf_log.dart';
 import '../core/vault_service.dart';
@@ -30,7 +32,7 @@ class FilesTab extends ConsumerStatefulWidget {
   ConsumerState<FilesTab> createState() => _FilesTabState();
 }
 
-class _FilesTabState extends ConsumerState<FilesTab> {
+class _FilesTabState extends ConsumerState<FilesTab> implements DriveActionSink {
   String _directory = '';
   String _query = '';
   final _search = TextEditingController();
@@ -52,12 +54,34 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   String? _rowKeysScope;
   String? _dragRow;
 
+  /// Row the arrow keys act on, which may sit inside the selection.
+  String? _cursor;
+
+  /// Last row clicked with a mouse, to detect the second click of a double click
+  /// without a double-tap recognizer, which would delay every single click.
+  String? _lastTapPath;
+  DateTime _lastTapAt = DateTime.fromMillisecondsSinceEpoch(0);
+
   /// Set by the Select button, so selection can start without a long press.
   bool _selectionMode = false;
 
   /// Holds keyboard focus for the selection shortcuts (Escape, Ctrl+A, Delete).
   final _shortcutsFocus = FocusNode(debugLabel: 'files');
+  final _searchFocus = FocusNode(debugLabel: 'search');
   List<VaultEntry> _visibleEntries = const [];
+
+  /// Drive's cut/copy buffer: entries, not bytes, so a paste never decrypts twice.
+  DriveClipboard? _clipboard;
+
+  /// Reverses moves and copies with Ctrl+Z / Ctrl+Y.
+  final _journal = UndoJournal();
+
+  /// Folder history behind Alt+← and Alt+→.
+  final _back = <String>[];
+  final _forward = <String>[];
+
+  final _typeAhead = TypeAheadBuffer();
+  late final DriveShortcutController _shortcutController = DriveShortcutController(this);
 
   bool get _selecting => _selectionMode || _selection.isNotEmpty;
   bool _dragging = false;
@@ -79,12 +103,32 @@ class _FilesTabState extends ConsumerState<FilesTab> {
   }
 
   @override
+  void didUpdateWidget(FilesTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Coming back from another tab: the list must own the keyboard again, or the
+    // shortcuts would go to whatever took focus (the nav rail, a dialog button).
+    if (!oldWidget.active && widget.active) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _shortcutsFocus.requestFocus();
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _sharedFiles?.cancel();
     _searchDebounce?.cancel();
     _search.dispose();
+    _searchFocus.dispose();
     _shortcutsFocus.dispose();
     super.dispose();
+  }
+
+  void _navigate(String directory) {
+    if (directory == _directory) return;
+    _back.add(_directory);
+    _forward.clear();
+    _open(directory);
   }
 
   void _open(String directory) {
@@ -92,6 +136,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
     _selection.clear();
     _rangeSelection.clear();
     _selectionAnchor = null;
+    _cursor = null;
     _selectionMode = false;
     setState(() {
       _directory = directory;
@@ -269,12 +314,48 @@ class _FilesTabState extends ConsumerState<FilesTab> {
     if (choice == 'folder') await _newFolder();
   }
 
+  /// Touch opens a row on tap and selects it on long press; a mouse selects a
+  /// row on click and opens it on double click, as Drive does.
   Future<void> _onTap(VaultEntry entry) async {
     _shortcutsFocus.requestFocus();
+    if (_onPhone) {
+      if (_selecting) return _toggleSelection(entry);
+      return _openEntry(entry);
+    }
     final keyboard = HardwareKeyboard.instance;
-    if (keyboard.isShiftPressed) return _extendSelection(entry);
-    if (keyboard.isControlPressed || keyboard.isMetaPressed || _selecting) return _toggleSelection(entry);
-    if (entry.isDir) return _open(entry.path);
+    if (keyboard.isShiftPressed) {
+      _lastTapPath = null;
+      return _extendSelection(entry);
+    }
+    if (keyboard.isControlPressed || keyboard.isMetaPressed) {
+      _lastTapPath = null;
+      return _toggleSelection(entry);
+    }
+    final now = DateTime.now();
+    final isDoubleClick = _lastTapPath == entry.path && now.difference(_lastTapAt) < kDoubleTapTimeout;
+    _lastTapPath = entry.path;
+    _lastTapAt = now;
+    if (isDoubleClick) {
+      _lastTapPath = null;
+      return _openEntry(entry);
+    }
+    if (_selection.length == 1 && _selection.containsKey(entry.path)) return;
+    _selectOnly(entry);
+  }
+
+  void _selectOnly(VaultEntry entry) {
+    setState(() {
+      _selection
+        ..clear()
+        ..[entry.path] = entry;
+      _rangeSelection.clear();
+      _selectionAnchor = entry.path;
+      _cursor = entry.path;
+    });
+  }
+
+  Future<void> _openEntry(VaultEntry entry) async {
+    if (entry.isDir) return _navigate(entry.path);
     await _actions.run(entry, EntryAction.open);
   }
 
@@ -284,18 +365,33 @@ class _FilesTabState extends ConsumerState<FilesTab> {
       _rangeSelection.remove(entry.path);
       if (_selection.remove(entry.path) == null) _selection[entry.path] = entry;
       _selectionAnchor = entry.path;
+      _cursor = entry.path;
     });
   }
 
-  /// A row's bounds, so a long-press drag can tell which row the finger is over.
+  /// A row's bounds, so a drag or a keyboard move can tell which row it means.
   Widget _selectableRow(VaultEntry entry, Widget row) {
     return GestureDetector(
       key: _rowKeys.putIfAbsent(entry.path, () => GlobalKey(debugLabel: 'row:${entry.path}')),
       onLongPressStart: (_) => _startDragSelection(entry),
       onLongPressMoveUpdate: (details) => _dragSelectionTo(details.globalPosition),
       onLongPressEnd: (_) => _dragRow = null,
+      onSecondaryTap: () => _onSecondaryTap(entry),
       child: row,
     );
+  }
+
+  /// Right click selects the row when needed, then opens its menu, as Drive does.
+  void _onSecondaryTap(VaultEntry entry) {
+    _shortcutsFocus.requestFocus();
+    if (!_selection.containsKey(entry.path)) _selectOnly(entry);
+    unawaited(_onMenu(entry));
+  }
+
+  /// A click on empty space clears the selection, as in Drive.
+  void _onEmptyArea() {
+    if (_onPhone || !_selecting) return;
+    _clearSelection();
   }
 
   /// Long press selects the row and anchors there; dragging then extends the
@@ -323,6 +419,83 @@ class _FilesTabState extends ConsumerState<FilesTab> {
       if ((box.localToGlobal(Offset.zero) & box.size).contains(globalPosition)) return entry.path;
     }
     return null;
+  }
+
+  /// Every bound key goes through [DriveShortcutController], so the shipped
+  /// behaviour is exactly the table the unit tests cover. Letters that no binding
+  /// claims feed the type-ahead buffer, as in a file manager.
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    final keyboard = HardwareKeyboard.instance;
+    final primary = keyboard.isControlPressed || keyboard.isMetaPressed;
+    final alt = keyboard.isAltPressed;
+    final shift = keyboard.isShiftPressed;
+    if (_shortcutController.handleKey(key: event.logicalKey, primary: primary, alt: alt, shift: shift)) {
+      return KeyEventResult.handled;
+    }
+    return _typeAheadKey(event, primary: primary, alt: alt) ? KeyEventResult.handled : KeyEventResult.ignored;
+  }
+
+  bool _typeAheadKey(KeyEvent event, {required bool primary, required bool alt}) {
+    final character = event.character;
+    if (character == null || character.isEmpty || primary || alt) return false;
+    if (!RegExp(r'^[\w .\-]$').hasMatch(character)) return false;
+    final prefix = _typeAhead.add(character, DateTime.now());
+    final index = typeAheadMatch([for (final entry in _visibleEntries) entry.name], prefix, after: _cursorIndex);
+    if (index != null) {
+      final entry = _visibleEntries[index];
+      _selectOnly(entry);
+      _scrollToRow(entry.path);
+    }
+    return true;
+  }
+
+  int get _cursorIndex {
+    final path = _cursor ?? _selectionAnchor;
+    if (path == null) return -1;
+    return _visibleEntries.indexWhere((entry) => entry.path == path);
+  }
+
+  void _moveCursor(int delta, {required bool extend}) {
+    final current = _cursorIndex;
+    if (current == -1) return _moveCursorTo(delta > 0 ? 0 : _visibleEntries.length - 1, extend: extend);
+    _moveCursorTo(current + delta, extend: extend);
+  }
+
+  void _moveCursorTo(int index, {required bool extend}) {
+    if (index < 0 || index >= _visibleEntries.length) return;
+    final entry = _visibleEntries[index];
+    if (extend) {
+      setState(() => _cursor = entry.path);
+      _extendSelection(entry);
+    } else {
+      _selectOnly(entry);
+    }
+    _scrollToRow(entry.path);
+  }
+
+  void _moveFocus(int delta) {
+    if (_visibleEntries.isEmpty) return;
+    final current = _cursorIndex;
+    final index = current == -1 ? (delta > 0 ? 0 : _visibleEntries.length - 1) : current + delta;
+    if (index < 0 || index >= _visibleEntries.length) return;
+    setState(() => _cursor = _visibleEntries[index].path);
+    _scrollToRow(_visibleEntries[index].path);
+  }
+
+  void _openCursor() {
+    final path = _cursor ?? _selectionAnchor;
+    for (final entry in _visibleEntries) {
+      if (entry.path != path) continue;
+      _openEntry(entry);
+      return;
+    }
+  }
+
+  void _scrollToRow(String path) {
+    final context = _rowKeys[path]?.currentContext;
+    if (context == null) return;
+    Scrollable.ensureVisible(context, alignment: 0.5, duration: const Duration(milliseconds: 120));
   }
 
   /// Shift-click or drag: selects from the anchor to [entry], or just [entry]
@@ -353,6 +526,413 @@ class _FilesTabState extends ConsumerState<FilesTab> {
       _selection[entry.path] = entry;
     }
   });
+
+  Future<void> _renameSelected() async {
+    if (_selection.length != 1) {
+      showMessage(context, 'Rename works on one item at a time.');
+      return;
+    }
+    await _actions.run(_selection.values.single, EntryAction.rename);
+  }
+
+  // --- DriveActionSink: what the keymap can ask the list to do --------------
+
+  @override
+  void moveToFolder() {
+    if (_selection.isEmpty) return;
+    unawaited(_moveSelected());
+  }
+
+  @override
+  void cut() => _rememberClipboard(isCut: true);
+
+  @override
+  void copy() => _rememberClipboard(isCut: false);
+
+  void _rememberClipboard({required bool isCut}) {
+    final entries = _selectedEntries;
+    if (entries.isEmpty) return;
+    setState(() => _clipboard = DriveClipboard(entries: entries, isCut: isCut));
+    showMessage(context, '${isCut ? 'Cut' : 'Copied'} ${entries.length} ${entries.length == 1 ? 'item' : 'items'}');
+  }
+
+  @override
+  void paste() => unawaited(_paste());
+
+  Future<void> _paste() async {
+    final clipboard = _clipboard;
+    if (clipboard == null || clipboard.isEmpty) {
+      showMessage(context, 'Nothing to paste: cut or copy something first.');
+      return;
+    }
+    final folder = _directory;
+    final entries = clipboard.isCut
+        ? clipboard.entries.where((entry) => parentVaultPath(entry.path) != folder).toList()
+        : clipboard.entries;
+    if (entries.isEmpty) return;
+    if (clipboard.isCut) setState(() => _hidden.addAll(entries.map((entry) => entry.path)));
+    final affected = clipboard.isCut
+        ? await _actions.moveMany(entries, folder)
+        : await _actions.copyMany(entries, folder);
+    if (!mounted) return;
+    setState(() {
+      if (clipboard.isCut) _hidden.removeAll(entries.map((entry) => entry.path));
+    });
+    if (affected.isEmpty) return;
+    if (clipboard.isCut) setState(() => _clipboard = null);
+    _journal.record(
+      VaultOperation(
+        kind: clipboard.isCut ? VaultOperationKind.move : VaultOperationKind.copy,
+        to: folder,
+        entries: entries,
+      ),
+    );
+    await _reload();
+    if (!mounted) return;
+    showMessage(
+      context,
+      '${clipboard.isCut ? 'Moved' : 'Copied'} ${affected.length} to ${folder.isEmpty ? 'Vault' : folder}',
+    );
+  }
+
+  @override
+  void copyTitles() => unawaited(_copyTitles());
+
+  Future<void> _copyTitles() async {
+    final titles = _selectedEntries.map((entry) => entry.name).join('\n');
+    if (titles.isEmpty) return;
+    if (!await _writeClipboard(titles)) return;
+    if (!mounted) return;
+    showMessage(context, 'Copied ${_selection.length} ${_selection.length == 1 ? 'title' : 'titles'}');
+  }
+
+  /// Returns false when the platform has no clipboard to write to.
+  Future<bool> _writeClipboard(String text) async {
+    try {
+      await Clipboard.setData(ClipboardData(text: text));
+      return true;
+    } catch (error) {
+      if (mounted) showMessage(context, 'Could not copy to the clipboard: ${describeError(error)}');
+      return false;
+    }
+  }
+
+  @override
+  void copyPaths() => unawaited(_copyPaths());
+
+  Future<void> _copyPaths() async {
+    final paths = _selectedEntries.map((entry) => entry.path).join('\n');
+    if (paths.isEmpty) return;
+    if (!await _writeClipboard(paths)) return;
+    if (!mounted) return;
+    showMessage(context, 'Copied ${_selection.length} ${_selection.length == 1 ? 'path' : 'paths'}');
+  }
+
+  @override
+  void shareSelection() => unawaited(_shareSelection());
+
+  Future<void> _shareSelection() async {
+    final files = _selectedEntries.where((entry) => !entry.isDir).toList();
+    if (files.isEmpty) {
+      showMessage(context, 'Share works on files.');
+      return;
+    }
+    if (!canShareFiles) {
+      showMessage(context, 'This platform has no share sheet: use Save decrypted copies instead.');
+      return;
+    }
+    await _actions.shareMany(files);
+  }
+
+  @override
+  void focusList() => _shortcutsFocus.requestFocus();
+
+  @override
+  void undo() => unawaited(_applyJournal(undo: true));
+
+  @override
+  void redo() => unawaited(_applyJournal(undo: false));
+
+  Future<void> _applyJournal({required bool undo}) async {
+    final operation = undo ? _journal.undo() : _journal.redo();
+    if (operation == null) {
+      showMessage(context, undo ? 'Nothing to undo.' : 'Nothing to redo.');
+      return;
+    }
+    var changed = 0;
+    for (final entry in operation.entries) {
+      final destination = copiedPath(entry.path, operation.to);
+      try {
+        switch (operation.kind) {
+          case VaultOperationKind.move:
+            final from = undo ? destination : entry.path;
+            final to = undo ? entry.path : destination;
+            await _vault.move(_pathEntry(from, entry.isDir), to);
+          case VaultOperationKind.copy:
+            if (undo) {
+              await _vault.delete(_pathEntry(destination, entry.isDir));
+            } else {
+              await _vault.copy(entry, destination);
+            }
+        }
+        changed++;
+      } catch (error) {
+        if (mounted) showMessage(context, describeError(error));
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _selection.clear();
+      _rangeSelection.clear();
+      _selectionAnchor = null;
+      _cursor = null;
+    });
+    await _reload();
+    ref.invalidate(folderProvider(operation.to));
+    if (changed > 0 && mounted) showMessage(context, undo ? 'Undone.' : 'Redone.');
+  }
+
+  VaultEntry _pathEntry(String path, bool isDir) =>
+      VaultEntry(path: path, name: p.basename(path), isDir: isDir, size: 0, modTime: null);
+
+  @override
+  void openCurrent() => _openCursor();
+
+  @override
+  void renameCurrent() => unawaited(_renameSelected());
+
+  @override
+  void deleteSelection() {
+    if (_selection.isEmpty) return;
+    unawaited(_deleteSelected());
+  }
+
+  @override
+  void previewCurrent() {
+    final entries = _selectedEntries;
+    if (entries.length != 1) {
+      showMessage(context, 'Preview works on one item at a time.');
+      return;
+    }
+    final entry = entries.single;
+    if (entry.isDir) {
+      showMessage(context, 'Folders have no preview.');
+      return;
+    }
+    if (!canPreview(entry)) {
+      showMessage(context, 'No preview for this file type.');
+      return;
+    }
+    unawaited(_actions.run(entry, EntryAction.preview));
+  }
+
+  @override
+  void toggleCurrent() {
+    final index = _cursorIndex;
+    if (index == -1) return;
+    _toggleSelection(_visibleEntries[index]);
+  }
+
+  @override
+  void selectAll() => _selectAll();
+
+  @override
+  void clearSelection() => _clearSelection();
+
+  @override
+  void moveRow(int delta, {required bool extend}) => _moveCursor(delta, extend: extend);
+
+  @override
+  void moveFocus(int delta) => _moveFocus(delta);
+
+  @override
+  void selectEdge({required bool last, required bool extend}) {
+    if (_visibleEntries.isEmpty) return;
+    _moveCursorTo(last ? _visibleEntries.length - 1 : 0, extend: extend);
+  }
+
+  @override
+  void upOneFolder() {
+    if (_query.isNotEmpty) return _open(_directory);
+    _navigate(parentVaultPath(_directory));
+  }
+
+  @override
+  void goBack() {
+    if (_back.isEmpty) return;
+    _forward.add(_directory);
+    _open(_back.removeLast());
+  }
+
+  @override
+  void goForward() {
+    if (_forward.isEmpty) return;
+    _back.add(_directory);
+    _open(_forward.removeLast());
+  }
+
+  @override
+  void refresh() => _refresh();
+
+  @override
+  void focusSearch() {
+    if (_selecting) _clearSelection();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
+  @override
+  void newFolder() => unawaited(_newFolder());
+
+  @override
+  void upload() => unawaited(_pickAndUpload());
+
+  @override
+  void openCreateMenu() => unawaited(_showAddSheet());
+
+  @override
+  void openSettings() => ref.read(homeTabProvider.notifier).select(2);
+
+  @override
+  void showShortcutList() => _showShortcutList();
+
+  @override
+  void showProperties() => _showProperties();
+
+  void _showShortcutList() {
+    final grouped = <DriveAction, List<String>>{};
+    for (final binding in driveKeyBindings) {
+      (grouped[binding.action] ??= []).add(driveBindingLabel(binding));
+    }
+    final actions = grouped.keys.toList()..sort((a, b) => driveActionLabel(a).compareTo(driveActionLabel(b)));
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Keyboard shortcuts'),
+        content: SizedBox(
+          width: (MediaQuery.sizeOf(context).width - 140).clamp(220.0, 560.0).toDouble(),
+          height: (MediaQuery.sizeOf(context).height - 260).clamp(160.0, 520.0).toDouble(),
+          child: ListView(
+            children: [
+              for (final action in actions)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(width: 220, child: Text(driveActionLabel(action))),
+                      Expanded(
+                        child: Text(
+                          grouped[action]!.join('  or  '),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 220, child: Text('New folder / upload (chord)')),
+                    Expanded(child: Text('Alt+C then F, or Alt+C then U or I')),
+                  ],
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 220, child: Text('Focus the list (chord)')),
+                    Expanded(child: Text('Alt+G then I')),
+                  ],
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 220, child: Text('Jump to a name')),
+                    Expanded(child: Text('Type its first letters')),
+                  ],
+                ),
+              ),
+              const Divider(height: 24),
+              Text(
+                'From Drive, with nothing to act on here: star, create shortcut, paste as shortcut, '
+                'print, grid/list toggle, row density, details pane, sort menu, the folders/page/details '
+                'focus chords (Alt+G then I focuses this list), and the download/upload status panel.',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            key: const Key('closeShortcuts'),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showProperties() {
+    final entries = _selectedEntries;
+    if (entries.length != 1) {
+      showMessage(context, 'Properties need one selected item.');
+      return;
+    }
+    final entry = entries.single;
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Properties'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _property('Name', entry.name),
+            _property('Type', entry.isDir ? 'Folder' : (entry.mimeType ?? 'File')),
+            if (!entry.isDir) _property('Size', formatBytes(entry.size)),
+            _property('Modified', entry.modTime == null ? 'Unknown' : formatDate(entry.modTime!)),
+            _property('In', parentVaultPath(entry.path).isEmpty ? 'Vault' : parentVaultPath(entry.path)),
+            _property('Path', entry.path),
+          ],
+        ),
+        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  Widget _property(String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 90,
+          child: Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+        ),
+        Expanded(child: SelectableText(value)),
+      ],
+    ),
+  );
+
+  @override
+  void showContextMenu() {
+    final entries = _selectedEntries;
+    if (entries.length != 1) {
+      showMessage(context, 'More actions work on one item at a time.');
+      return;
+    }
+    unawaited(_onMenu(entries.single));
+  }
 
   void _clearSelection() => setState(() {
     _selection.clear();
@@ -462,7 +1042,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
         if (didPop) return;
         if (_selecting) return _clearSelection();
         if (searching) return _open(_directory);
-        _open(parentVaultPath(_directory));
+        _navigate(parentVaultPath(_directory));
       },
       child: DropTarget(
         enable: widget.active && (ModalRoute.of(context)?.isCurrent ?? true),
@@ -475,63 +1055,54 @@ class _FilesTabState extends ConsumerState<FilesTab> {
         onDragDone: _onDropped,
         child: Stack(
           children: [
-            CallbackShortcuts(
-              bindings: {
-                const SingleActivator(LogicalKeyboardKey.escape): _clearSelection,
-                const SingleActivator(LogicalKeyboardKey.keyA, control: true): _selectAll,
-                const SingleActivator(LogicalKeyboardKey.keyA, meta: true): _selectAll,
-                const SingleActivator(LogicalKeyboardKey.delete): () {
-                  if (_selection.isNotEmpty) _deleteSelected();
-                },
-              },
-              child: Focus(
-                focusNode: _shortcutsFocus,
-                autofocus: true,
-                child: Scaffold(
-                  body: SafeArea(
-                    bottom: false,
-                    child: Column(
-                      children: [
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 150),
-                          child: _selecting ? _selectionBar() : _searchHeader(),
-                        ),
-                        AnimatedSize(
-                          duration: const Duration(milliseconds: 200),
-                          child: searching
-                              ? const SizedBox(width: double.infinity)
-                              : _Breadcrumbs(directory: _directory, onOpen: _open),
-                        ),
-                        _transferStrip(),
-                        Expanded(
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 220),
-                            switchInCurve: Curves.easeOutCubic,
-                            transitionBuilder: (child, animation) => FadeTransition(
-                              opacity: animation,
-                              child: SlideTransition(
-                                position: Tween(begin: const Offset(0.04, 0), end: Offset.zero).animate(animation),
-                                child: child,
-                              ),
-                            ),
-                            child: KeyedSubtree(
-                              key: ValueKey(searching ? 'search:$_query' : 'dir:$_directory'),
-                              child: searching ? _searchResults() : _folderContents(),
+            Focus(
+              focusNode: _shortcutsFocus,
+              autofocus: true,
+              onKeyEvent: _onKey,
+              child: Scaffold(
+                body: SafeArea(
+                  bottom: false,
+                  child: Column(
+                    children: [
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 150),
+                        child: _selecting ? _selectionBar() : _searchHeader(),
+                      ),
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 200),
+                        child: searching
+                            ? const SizedBox(width: double.infinity)
+                            : _Breadcrumbs(directory: _directory, onOpen: _navigate),
+                      ),
+                      _transferStrip(),
+                      Expanded(
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          switchInCurve: Curves.easeOutCubic,
+                          transitionBuilder: (child, animation) => FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: Tween(begin: const Offset(0.04, 0), end: Offset.zero).animate(animation),
+                              child: child,
                             ),
                           ),
+                          child: KeyedSubtree(
+                            key: ValueKey(searching ? 'search:$_query' : 'dir:$_directory'),
+                            child: searching ? _searchResults() : _folderContents(),
+                          ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  floatingActionButton: _selecting
-                      ? null
-                      : FloatingActionButton(
-                          key: const Key('addButton'),
-                          tooltip: 'Add',
-                          onPressed: _showAddSheet,
-                          child: const Icon(Icons.add),
-                        ),
                 ),
+                floatingActionButton: _selecting
+                    ? null
+                    : FloatingActionButton(
+                        key: const Key('addButton'),
+                        tooltip: 'Add',
+                        onPressed: _showAddSheet,
+                        child: const Icon(Icons.add),
+                      ),
               ),
             ),
             if (_dragging) Positioned.fill(child: _DropOverlay(directory: _directory)),
@@ -550,6 +1121,7 @@ class _FilesTabState extends ConsumerState<FilesTab> {
           Expanded(
             child: SearchBar(
               key: const Key('searchField'),
+              focusNode: _searchFocus,
               controller: _search,
               hintText: 'Search in vault',
               leading: const Icon(Icons.search),
@@ -563,12 +1135,14 @@ class _FilesTabState extends ConsumerState<FilesTab> {
               },
             ),
           ),
-          IconButton(
-            key: const Key('startSelecting'),
-            tooltip: 'Select',
-            icon: const Icon(Icons.checklist),
-            onPressed: _startSelecting,
-          ),
+          // A mouse starts a selection with a click; only touch needs this.
+          if (_onPhone)
+            IconButton(
+              key: const Key('startSelecting'),
+              tooltip: 'Select',
+              icon: const Icon(Icons.checklist),
+              onPressed: _startSelecting,
+            ),
           IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: _refresh),
         ],
       ),
@@ -701,43 +1275,50 @@ class _FilesTabState extends ConsumerState<FilesTab> {
         if (visible.isEmpty && pendingUploads.isEmpty) return const _EmptyFolder();
         return RefreshIndicator(
           onRefresh: () => ref.refresh(folderProvider(directory).future),
-          child: ListView.builder(
-            padding: const EdgeInsets.only(bottom: 96),
-            itemCount: pendingUploads.length + visible.length,
-            itemBuilder: (context, index) {
-              if (index < pendingUploads.length) {
-                final upload = pendingUploads[index];
-                return EntryRow(
-                  key: Key('pending:${upload.path}'),
-                  entry: VaultEntry(path: upload.path, name: upload.name, isDir: false, size: -1, modTime: null),
-                  vault: _vault,
-                  transfer: upload,
-                  onTap: null,
-                  onMenu: null,
-                );
-              }
-              final entry = visible[index - pendingUploads.length];
-              return Dismissible(
-                key: ValueKey('dismiss:${entry.path}'),
-                direction: _selecting ? DismissDirection.none : DismissDirection.endToStart,
-                background: const _DeleteBackground(),
-                confirmDismiss: (_) => confirmDelete(context, entry),
-                onDismissed: (_) => _deleteOptimistically(entry),
-                child: _selectableRow(
-                  entry,
-                  EntryRow(
-                    key: Key('entry:${entry.path}'),
-                    entry: entry,
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            excludeFromSemantics: true,
+            onTap: _onEmptyArea,
+            child: ListView.builder(
+              padding: const EdgeInsets.only(bottom: 96),
+              itemCount: pendingUploads.length + visible.length,
+              itemBuilder: (context, index) {
+                if (index < pendingUploads.length) {
+                  final upload = pendingUploads[index];
+                  return EntryRow(
+                    key: Key('pending:${upload.path}'),
+                    entry: VaultEntry(path: upload.path, name: upload.name, isDir: false, size: -1, modTime: null),
                     vault: _vault,
-                    transfer: transfers[entry.path],
-                    onTap: () => _onTap(entry),
-                    onMenu: () => _onMenu(entry),
-                    onIconTap: () => _toggleSelection(entry),
-                    selected: _selecting ? _selection.containsKey(entry.path) : null,
+                    transfer: upload,
+                    onTap: null,
+                    onMenu: null,
+                  );
+                }
+                final entry = visible[index - pendingUploads.length];
+                return Dismissible(
+                  key: ValueKey('dismiss:${entry.path}'),
+                  // Touch selects with a long press, so a swipe would fight it; a mouse
+                  // starts a selection on pointer down, which must not kill its own swipe.
+                  direction: _onPhone && _selecting ? DismissDirection.none : DismissDirection.endToStart,
+                  background: const _DeleteBackground(),
+                  confirmDismiss: (_) => confirmDelete(context, entry),
+                  onDismissed: (_) => _deleteOptimistically(entry),
+                  child: _selectableRow(
+                    entry,
+                    EntryRow(
+                      key: Key('entry:${entry.path}'),
+                      entry: entry,
+                      vault: _vault,
+                      transfer: transfers[entry.path],
+                      onTap: () => _onTap(entry),
+                      onMenu: () => _onMenu(entry),
+                      onIconTap: () => _toggleSelection(entry),
+                      selected: _selecting ? _selection.containsKey(entry.path) : null,
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         );
       },
@@ -760,27 +1341,33 @@ class _FilesTabState extends ConsumerState<FilesTab> {
             detail: 'Nothing in the vault matches "$_query".',
           );
         }
-        return ListView.builder(
-          padding: const EdgeInsets.only(bottom: 96),
-          itemCount: visible.length,
-          itemBuilder: (context, index) {
-            final entry = visible[index];
-            final parent = parentVaultPath(entry.path);
-            return _selectableRow(
-              entry,
-              EntryRow(
-                key: Key('result:${entry.path}'),
-                entry: entry,
-                vault: _vault,
-                transfer: transfers[entry.path],
-                subtitleOverride: 'in ${parent.isEmpty ? 'Vault' : parent} · ${describeEntry(entry)}',
-                onTap: () => _onTap(entry),
-                onMenu: () => _onMenu(entry),
-                onIconTap: () => _toggleSelection(entry),
-                selected: _selecting ? _selection.containsKey(entry.path) : null,
-              ),
-            );
-          },
+        return GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          excludeFromSemantics: true,
+          onTap: _onEmptyArea,
+          child: ListView.builder(
+            padding: const EdgeInsets.only(bottom: 96),
+            itemCount: visible.length,
+            itemBuilder: (context, index) {
+              final entry = visible[index];
+              final parent = parentVaultPath(entry.path);
+              return _selectableRow(
+                entry,
+                EntryRow(
+                  key: Key('result:${entry.path}'),
+                  entry: entry,
+                  vault: _vault,
+                  transfer: transfers[entry.path],
+                  subtitleOverride: 'in ${parent.isEmpty ? 'Vault' : parent} · ${describeEntry(entry)}',
+                  onTap: () => _onTap(entry),
+                  onMenu: () => _onMenu(entry),
+                  onIconTap: () => _toggleSelection(entry),
+                  selected: _selecting ? _selection.containsKey(entry.path) : null,
+                  focused: _cursor == entry.path,
+                ),
+              );
+            },
+          ),
         );
       },
     );

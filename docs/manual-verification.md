@@ -32,6 +32,9 @@ cd app && flutter run -d linux     # or run the AppImage from CI
 - [ ] Drag a **folder** with a subfolder and an empty subfolder onto the list:
       it appears as one folder, its files land in it, and the empty subfolder
       survives.
+- [ ] Select a file, `Ctrl`+`C`, open another folder, `Ctrl`+`V`: a copy lands
+      there; `Ctrl`+`Z` removes it and `Ctrl`+`Y` brings it back. `Ctrl`+`/`
+      lists every shortcut.
 - [ ] Open [drive.google.com](https://drive.google.com): the `CryptDrive`
       folder only contains encrypted names.
 

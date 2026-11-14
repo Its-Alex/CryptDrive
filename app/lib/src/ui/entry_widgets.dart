@@ -145,6 +145,7 @@ class EntryRow extends StatelessWidget {
     this.subtitleOverride,
     this.onIconTap,
     this.selected,
+    this.focused = false,
   });
 
   final VaultEntry entry;
@@ -160,6 +161,9 @@ class EntryRow extends StatelessWidget {
 
   /// Null outside selection mode; true or false while rows are being selected.
   final bool? selected;
+
+  /// Keyboard focus ring, so Ctrl+arrows can move without selecting.
+  final bool focused;
 
   @override
   Widget build(BuildContext context) {
@@ -191,6 +195,12 @@ class EntryRow extends StatelessWidget {
     );
     return Material(
       color: isSelected ? scheme.secondaryContainer : Colors.transparent,
+      shape: focused && !isSelected
+          ? RoundedRectangleBorder(
+              side: BorderSide(color: scheme.primary, width: 1.5),
+              borderRadius: BorderRadius.circular(8),
+            )
+          : null,
       child: InkWell(
         onTap: idle ? onTap : null,
         child: Padding(

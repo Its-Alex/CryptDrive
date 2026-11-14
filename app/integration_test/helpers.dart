@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Closes the on-screen keyboard first: on phones it shrinks the viewport over the target.
@@ -42,4 +43,72 @@ Future<void> pumpUntilGone(WidgetTester tester, Finder finder, {Duration timeout
     if (finder.evaluate().isEmpty) return;
   }
   throw TestFailure('Timed out waiting for $finder to disappear');
+}
+
+/// A mouse click on a row selects it, a second click opens or enters it.
+Future<void> openEntry(WidgetTester tester, Finder finder) async {
+  await tester.tap(finder);
+  await tester.pump(const Duration(milliseconds: 60));
+  await tester.tap(finder);
+  await tester.pump();
+}
+
+/// Ctrl-click, which toggles a row without dropping the rest of the selection.
+Future<void> controlClick(WidgetTester tester, Finder finder) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft, physicalKey: PhysicalKeyboardKey.controlLeft);
+  await tester.tap(finder);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft, physicalKey: PhysicalKeyboardKey.controlLeft);
+  await tester.pump();
+}
+
+/// Lets the row icon cross-fade finish, so only the current check mark is in the tree.
+Future<void> settleCheck(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 250));
+  await tester.pump();
+}
+
+/// Sends a key chord the way a desktop user would: modifier down, key, modifier up.
+Future<void> pressWithControl(WidgetTester tester, LogicalKeyboardKey key, PhysicalKeyboardKey physical) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft, physicalKey: PhysicalKeyboardKey.controlLeft);
+  await tester.sendKeyEvent(key, physicalKey: physical);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft, physicalKey: PhysicalKeyboardKey.controlLeft);
+  await tester.pump();
+}
+
+Future<void> pressWithControlShift(WidgetTester tester, LogicalKeyboardKey key, PhysicalKeyboardKey physical) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft, physicalKey: PhysicalKeyboardKey.controlLeft);
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
+  await tester.sendKeyEvent(key, physicalKey: physical);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft, physicalKey: PhysicalKeyboardKey.controlLeft);
+  await tester.pump();
+}
+
+Future<void> pressWithControlAlt(WidgetTester tester, LogicalKeyboardKey key, PhysicalKeyboardKey physical) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft, physicalKey: PhysicalKeyboardKey.controlLeft);
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft, physicalKey: PhysicalKeyboardKey.altLeft);
+  await tester.sendKeyEvent(key, physicalKey: physical);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft, physicalKey: PhysicalKeyboardKey.altLeft);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft, physicalKey: PhysicalKeyboardKey.controlLeft);
+  await tester.pump();
+}
+
+Future<void> pressWithAlt(WidgetTester tester, LogicalKeyboardKey key, PhysicalKeyboardKey physical) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft, physicalKey: PhysicalKeyboardKey.altLeft);
+  await tester.sendKeyEvent(key, physicalKey: physical);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft, physicalKey: PhysicalKeyboardKey.altLeft);
+  await tester.pump();
+}
+
+Future<void> pressWithShift(WidgetTester tester, LogicalKeyboardKey key, PhysicalKeyboardKey physical) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
+  await tester.sendKeyEvent(key, physicalKey: physical);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
+  await tester.pump();
+}
+
+Future<void> pressKey(WidgetTester tester, LogicalKeyboardKey key, PhysicalKeyboardKey physical) async {
+  await tester.sendKeyEvent(key, physicalKey: physical);
+  await tester.pump();
 }

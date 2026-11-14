@@ -7,6 +7,16 @@ import '../core/vault_service.dart';
 
 final secretStoreProvider = Provider<SecretStore>((ref) => SecureSecretStore());
 
+/// Which tab the shell shows: 0 Files, 1 Recent, 2 Settings.
+class HomeTab extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void select(int index) => state = index;
+}
+
+final homeTabProvider = NotifierProvider<HomeTab, int>(HomeTab.new);
+
 /// Overridden in tests to point at temporary directories.
 final appDirectoriesProvider = Provider<AppDirectories?>((ref) => null);
 

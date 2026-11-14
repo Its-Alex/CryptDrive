@@ -121,7 +121,7 @@ void main() {
     // z.txt was outside the shrunk range, so it is still there.
     await pumpUntilFound(tester, find.byKey(const Key('entry:z.txt')));
 
-    await tester.tap(find.byKey(const Key('entry:Photos')));
+    await openEntry(tester, find.byKey(const Key('entry:Photos')));
     await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/plans.txt')));
 
     await tester.tap(find.byKey(const Key('openSettings')));

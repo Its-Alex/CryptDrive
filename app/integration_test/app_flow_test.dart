@@ -4,6 +4,7 @@ import 'package:cryptdrive/src/app.dart';
 import 'package:cryptdrive/src/core/bootstrap.dart';
 import 'package:cryptdrive/src/state/providers.dart';
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -48,6 +49,12 @@ void main() {
 
     // Real keystore: the config password went to flutter_secure_storage, the config is encrypted on disk.
     final environment = container.read(environmentProvider).requireValue;
+    // A mouse selects a row on click and opens it on double click; on a phone a tap
+    // opens, so the pointer-and-keyboard blocks below only run on a desktop.
+    final desktop =
+        defaultTargetPlatform == TargetPlatform.linux ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.macOS;
     expect(await environment.secrets!.readConfigPassword(), isNotEmpty);
 
     await tester.tap(find.byKey(const Key('chooseLocalFolder')));
@@ -108,20 +115,172 @@ void main() {
     }
     await tester.tap(find.byTooltip('Refresh'));
     await pumpUntilFound(tester, find.byKey(const Key('entry:c.txt')));
+
+    if (desktop) {
+      // The Drive keymap, end to end: dialogs, chord, settings, clipboard, undo.
+      await tester.tap(find.byKey(const Key('entry:a.txt')));
+      await settleCheck(tester);
+      await pressWithAlt(tester, LogicalKeyboardKey.enter, PhysicalKeyboardKey.enter);
+      await pumpUntilFound(tester, find.text('Properties'));
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+
+      await pressWithControl(tester, LogicalKeyboardKey.slash, PhysicalKeyboardKey.slash);
+      await pumpUntilFound(tester, find.text('Keyboard shortcuts'));
+      await tester.tap(find.byKey(const Key('closeShortcuts')));
+      await tester.pumpAndSettle();
+
+      // Alt+C then F is Drive's New folder chord.
+      await pressWithAlt(tester, LogicalKeyboardKey.keyC, PhysicalKeyboardKey.keyC);
+      await pressKey(tester, LogicalKeyboardKey.keyF, PhysicalKeyboardKey.keyF);
+      await pumpUntilFound(tester, find.byKey(const Key('askTextField')));
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      await pressWithControlShift(tester, LogicalKeyboardKey.keyS, PhysicalKeyboardKey.keyS);
+      await pumpUntilFound(tester, find.byKey(const Key('exportRcloneConf')));
+      await tester.tap(find.byKey(const Key('openFiles')));
+      await pumpUntilFound(tester, find.byKey(const Key('entry:a.txt')));
+
+      // Type-ahead jumps the selection; Shift+Space toggles it; Home/End pick the ends.
+      await tester.tap(find.byKey(const Key('entry:a.txt')));
+      await settleCheck(tester);
+      await pressKey(tester, LogicalKeyboardKey.keyB, PhysicalKeyboardKey.keyB);
+      await settleCheck(tester);
+      expect(
+        find.descendant(of: find.byKey(const Key('entry:b.txt')), matching: find.byKey(const ValueKey('selected'))),
+        findsOneWidget,
+      );
+      await pressWithShift(tester, LogicalKeyboardKey.space, PhysicalKeyboardKey.space);
+      await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
+      await pressKey(tester, LogicalKeyboardKey.end, PhysicalKeyboardKey.end);
+      await pumpUntilFound(tester, find.text('1 selected'));
+      await pressKey(tester, LogicalKeyboardKey.home, PhysicalKeyboardKey.home);
+      await pumpUntilFound(tester, find.text('1 selected'));
+
+      await tester.tap(find.byKey(const Key('entry:a.txt')));
+      await settleCheck(tester);
+      // Copying items and paths: the platform channel is intercepted so the test
+      // never reaches GTK's clipboard, which segfaults under a headless compositor
+      // (no seat, so Gdk has no data device).
+      final clipboard = <String>[];
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') clipboard.add((call.arguments as Map)['text'] as String);
+        return null;
+      });
+      await pressWithControlShift(tester, LogicalKeyboardKey.keyC, PhysicalKeyboardKey.keyC);
+      await pumpUntilFound(tester, find.text('Copied 1 title'));
+      await pressWithControlAlt(tester, LogicalKeyboardKey.keyL, PhysicalKeyboardKey.keyL);
+      await pumpUntilFound(tester, find.text('Copied 1 path'));
+      expect(clipboard, ['a.txt', 'a.txt']);
+      messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+
+      // Sharing only fails politely where the platform has no share sheet.
+      if (defaultTargetPlatform == TargetPlatform.linux) {
+        await pressWithControlAlt(tester, LogicalKeyboardKey.keyA, PhysicalKeyboardKey.keyA);
+        await pumpUntilFound(tester, find.text('This platform has no share sheet: use Save decrypted copies instead.'));
+      }
+
+      // Alt+G then I puts the keyboard back on the list, so an arrow moves the selection.
+      await pressWithAlt(tester, LogicalKeyboardKey.keyG, PhysicalKeyboardKey.keyG);
+      await pressKey(tester, LogicalKeyboardKey.keyI, PhysicalKeyboardKey.keyI);
+      await pressKey(tester, LogicalKeyboardKey.arrowDown, PhysicalKeyboardKey.arrowDown);
+      await pumpUntilFound(tester, find.text('1 selected'));
+      await tester.tap(find.byKey(const Key('clearSelection')));
+      await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
+
+      // Ctrl+F moves focus to the search field, and the results are selectable.
+      await pressWithControl(tester, LogicalKeyboardKey.keyF, PhysicalKeyboardKey.keyF);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('searchField')), 'plans');
+      await pumpUntilFound(tester, find.byKey(const Key('result:Photos/plans.txt')));
+      await tester.tap(find.byTooltip('Clear'));
+      await pumpUntilFound(tester, find.byKey(const Key('entry:a.txt')));
+
+      // Back and forward walk the folder history.
+      await openEntry(tester, find.byKey(const Key('entry:Photos')));
+      await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/plans.txt')));
+      await pressWithAlt(tester, LogicalKeyboardKey.arrowLeft, PhysicalKeyboardKey.arrowLeft);
+      await pumpUntilFound(tester, find.byKey(const Key('entry:a.txt')));
+      await pressWithAlt(tester, LogicalKeyboardKey.arrowRight, PhysicalKeyboardKey.arrowRight);
+      await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/plans.txt')));
+      await tester.tap(find.text('Vault'));
+      await pumpUntilFound(tester, find.byKey(const Key('entry:a.txt')));
+
+      // Copy into the folder, undo it, redo it, then delete the copy.
+      await tester.tap(find.byKey(const Key('entry:a.txt')));
+      await settleCheck(tester);
+      await pressWithControl(tester, LogicalKeyboardKey.keyC, PhysicalKeyboardKey.keyC);
+      await openEntry(tester, find.byKey(const Key('entry:Photos')));
+      await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/plans.txt')));
+      await pressWithControl(tester, LogicalKeyboardKey.keyV, PhysicalKeyboardKey.keyV);
+      await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/a.txt')));
+      await pressWithControl(tester, LogicalKeyboardKey.keyZ, PhysicalKeyboardKey.keyZ);
+      await pumpUntilGone(tester, find.byKey(const Key('entry:Photos/a.txt')));
+      await pressWithControl(tester, LogicalKeyboardKey.keyY, PhysicalKeyboardKey.keyY);
+      await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/a.txt')));
+      await tester.tap(find.byKey(const Key('entry:Photos/a.txt')));
+      await settleCheck(tester);
+      await tester.tap(find.byKey(const Key('deleteSelected')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirmButton')));
+      await pumpUntilGone(tester, find.byKey(const Key('entry:Photos/a.txt')));
+
+      // Cut and paste moves instead of copying; undo brings the file back.
+      await tester.tap(find.text('Vault'));
+      await pumpUntilFound(tester, find.byKey(const Key('entry:b.txt')));
+      await tester.tap(find.byKey(const Key('entry:b.txt')));
+      await settleCheck(tester);
+      await pressWithControl(tester, LogicalKeyboardKey.keyX, PhysicalKeyboardKey.keyX);
+      await openEntry(tester, find.byKey(const Key('entry:Photos')));
+      await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/plans.txt')));
+      await pressWithControl(tester, LogicalKeyboardKey.keyV, PhysicalKeyboardKey.keyV);
+      await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/b.txt')));
+      await pressWithControl(tester, LogicalKeyboardKey.keyZ, PhysicalKeyboardKey.keyZ);
+      await pumpUntilGone(tester, find.byKey(const Key('entry:Photos/b.txt')));
+      await tester.tap(find.text('Vault'));
+      await pumpUntilFound(tester, find.byKey(const Key('entry:b.txt')));
+    }
     await tester.longPress(find.byKey(const Key('entry:a.txt')));
     await pumpUntilFound(tester, find.text('1 selected'));
-    await tester.tap(find.byKey(const Key('entry:b.txt')));
+    await controlClick(tester, find.byKey(const Key('entry:b.txt')));
     await tester.tap(find.byKey(const Key('select:c.txt')));
     await pumpUntilFound(tester, find.text('3 selected'));
     await tester.tap(find.byKey(const Key('clearSelection')));
     await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
-    // Shift-click picks the range from the clicked row, even with nothing selected yet.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
-    await tester.tap(find.byKey(const Key('entry:a.txt')));
-    await pumpUntilFound(tester, find.text('1 selected'));
-    await tester.tap(find.byKey(const Key('entry:c.txt')));
-    await pumpUntilFound(tester, find.text('3 selected'));
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
+    if (desktop) {
+      // Drive keys: a click selects, arrows walk the selection, Shift+arrows extend it.
+      Finder selectedIcon(String path) =>
+          find.descendant(of: find.byKey(Key('entry:$path')), matching: find.byKey(const ValueKey('selected')));
+      await tester.tap(find.byKey(const Key('entry:a.txt')));
+      await settleCheck(tester);
+      expect(selectedIcon('a.txt'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown, physicalKey: PhysicalKeyboardKey.arrowDown);
+      await settleCheck(tester);
+      expect(selectedIcon('b.txt'), findsOneWidget);
+      expect(selectedIcon('a.txt'), findsNothing);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown, physicalKey: PhysicalKeyboardKey.arrowDown);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
+      await pumpUntilFound(tester, find.text('2 selected'));
+      await tester.tap(find.byKey(const Key('clearSelection')));
+      await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
+      // Enter opens the row the selection sits on.
+      await tester.tap(find.byKey(const Key('entry:Photos')));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter, physicalKey: PhysicalKeyboardKey.enter);
+      await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/plans.txt')));
+      await tester.tap(find.text('Vault'));
+      await pumpUntilFound(tester, find.byKey(const Key('entry:a.txt')));
+      // Shift-click picks the range from the clicked row, even with nothing selected yet.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
+      await tester.tap(find.byKey(const Key('entry:a.txt')));
+      await pumpUntilFound(tester, find.text('1 selected'));
+      await tester.tap(find.byKey(const Key('entry:c.txt')));
+      await pumpUntilFound(tester, find.text('3 selected'));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft, physicalKey: PhysicalKeyboardKey.shiftLeft);
+    }
     await tester.tap(find.byKey(const Key('moveSelected')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('askTextField')), 'Photos');
@@ -129,13 +288,13 @@ void main() {
     await pumpUntilGone(tester, find.byKey(const Key('entry:c.txt')));
     await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
 
-    await tester.tap(find.byKey(const Key('entry:Photos')));
+    await openEntry(tester, find.byKey(const Key('entry:Photos')));
     await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/plans.txt')));
     await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/c.txt')));
     await tester.longPress(find.byKey(const Key('entry:Photos/a.txt')));
     await pumpUntilFound(tester, find.text('1 selected'));
-    await tester.tap(find.byKey(const Key('entry:Photos/b.txt')));
-    await tester.tap(find.byKey(const Key('entry:Photos/c.txt')));
+    await controlClick(tester, find.byKey(const Key('entry:Photos/b.txt')));
+    await controlClick(tester, find.byKey(const Key('entry:Photos/c.txt')));
     await pumpUntilFound(tester, find.text('3 selected'));
     await tester.tap(find.byKey(const Key('clearSelection')));
     await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
@@ -204,11 +363,9 @@ void main() {
     );
     await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-one.txt')));
     await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-two.txt')));
-    await tester.tap(find.byKey(const Key('startSelecting')));
-    await pumpUntilFound(tester, find.text('0 selected'));
-    await tester.tap(find.byKey(const Key('entry:dropped-one.txt')));
+    await tester.longPress(find.byKey(const Key('entry:dropped-one.txt')));
     await pumpUntilFound(tester, find.text('1 selected'));
-    await tester.tap(find.byKey(const Key('entry:dropped-two.txt')));
+    await controlClick(tester, find.byKey(const Key('entry:dropped-two.txt')));
     await pumpUntilFound(tester, find.text('2 selected'));
     await tester.tap(find.byKey(const Key('deleteSelected')));
     await tester.pumpAndSettle();
@@ -229,9 +386,9 @@ void main() {
       ),
     );
     await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-tree')));
-    await tester.tap(find.byKey(const Key('entry:dropped-tree')));
+    await openEntry(tester, find.byKey(const Key('entry:dropped-tree')));
     await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-tree/top.txt')));
-    await tester.tap(find.byKey(const Key('entry:dropped-tree/inner')));
+    await openEntry(tester, find.byKey(const Key('entry:dropped-tree/inner')));
     await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-tree/inner/deep.txt')));
     await pumpUntilFound(tester, find.byKey(const Key('entry:dropped-tree/inner/empty')));
     final inner = await environment.vault.list('dropped-tree/inner');

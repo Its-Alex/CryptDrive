@@ -351,6 +351,25 @@ class VaultService {
     }
   }
 
+  /// Copies a file or folder inside the vault, leaving the original in place.
+  Future<void> copy(VaultEntry entry, String destinationPath) async {
+    final vault = await _vault();
+    if (!entry.isDir) {
+      await rclone.runJob('operations/copyfile', {
+        'srcFs': vault,
+        'srcRemote': entry.path,
+        'dstFs': vault,
+        'dstRemote': destinationPath,
+      });
+      return;
+    }
+    await rclone.runJob('sync/copy', {
+      'srcFs': '$vault${entry.path}',
+      'dstFs': '$vault$destinationPath',
+      'createEmptySrcDirs': true,
+    });
+  }
+
   /// Decrypts [entry] into [openedFilesDir] for an OS opener or share sheet.
   Future<File> decryptToTemp(VaultEntry entry, {void Function(JobProgress)? onProgress}) async {
     final targetDir = Directory(p.join(openedFilesDir!.path, _randomId()));

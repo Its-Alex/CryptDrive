@@ -11,6 +11,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../core/drop_folder_plan.dart';
 import '../core/perf_log.dart';
+import '../core/drive_shortcuts.dart';
 import '../core/vault_service.dart';
 import '../platform/browser_api.dart' as browser;
 import '../state/providers.dart';
@@ -383,6 +384,23 @@ class FileActions {
     sources.forEach(_refresh);
     _refresh(folder);
     return moved;
+  }
+
+  /// Copies every entry into [folder]; returns the paths of the new copies.
+  /// A name already present in the destination is left alone, as Drive does.
+  Future<Set<String>> copyMany(List<VaultEntry> entries, String folder) async {
+    final copied = <String>{};
+    final existing = {for (final entry in await _vault.list(folder)) entry.name};
+    for (final entry in entries) {
+      final destination = copiedPath(entry.path, folder);
+      if (destination == entry.path || existing.contains(entry.name)) continue;
+      if (await _attempt(() => _vault.copy(entry, destination))) {
+        copied.add(destination);
+        existing.add(entry.name);
+      }
+    }
+    _refresh(folder);
+    return copied;
   }
 
   /// Deletes every entry; returns the paths that were deleted.
