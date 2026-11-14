@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,9 +46,15 @@ Future<void> pumpUntilGone(WidgetTester tester, Finder finder, {Duration timeout
   throw TestFailure('Timed out waiting for $finder to disappear');
 }
 
-/// A mouse click on a row selects it, a second click opens or enters it.
+/// A mouse click on a row selects it, a second click opens or enters it. Touch has
+/// no such model: a single tap already opens, so a second tap would hit whatever
+/// the list shows after navigating.
 Future<void> openEntry(WidgetTester tester, Finder finder) async {
   await tester.tap(finder);
+  if (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) {
+    await tester.pump();
+    return;
+  }
   await tester.pump(const Duration(milliseconds: 60));
   await tester.tap(finder);
   await tester.pump();

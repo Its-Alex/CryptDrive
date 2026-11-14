@@ -67,7 +67,9 @@ void main() {
     await tester.enterText(find.byKey(const Key('vaultPasswordField')), 'correct horse battery staple');
     await tester.enterText(find.byKey(const Key('vaultPasswordConfirmationField')), 'correct horse battery staple');
     await tapVisible(tester, find.byKey(const Key('vaultSubmit')));
-    await pumpUntilFound(tester, find.text('This folder is empty.'));
+    // Creating the vault writes the rclone config and lists it once; on a freshly
+    // booted emulator that outlasts the default wait.
+    await pumpUntilFound(tester, find.text('This folder is empty.'), timeout: const Duration(minutes: 2));
     expect(environment.configFile!.readAsStringSync(), contains('RCLONE_ENCRYPT_V0:'));
 
     // Upload, as the file picker / share target does once the file is staged locally.
@@ -294,6 +296,7 @@ void main() {
     await tester.tap(find.byKey(const Key('askTextConfirm')));
     await pumpUntilGone(tester, find.byKey(const Key('entry:c.txt')));
     await pumpUntilGone(tester, find.byKey(const Key('selectionCount')));
+    await pumpUntilFound(tester, find.byKey(const Key('entry:Photos')));
 
     await openEntry(tester, find.byKey(const Key('entry:Photos')));
     await pumpUntilFound(tester, find.byKey(const Key('entry:Photos/plans.txt')));
